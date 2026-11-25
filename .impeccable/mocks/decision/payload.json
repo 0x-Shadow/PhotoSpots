@@ -1,0 +1,557 @@
+{
+  "title": "Choose PhotoSpot's visual world",
+  "question": "The roll dealt a hand for PhotoSpot's redesign. Keep the assigned direction, take an alternate, or re-roll.",
+  "options": [
+    {
+      "id": "assigned",
+      "label": "The Photobook Plate",
+      "kicker": "THE ROLL",
+      "lineage": "Aperture / Steidl photography monographs",
+      "thesis": "Every spot presented as a numbered plate with a hairline caption; the map is the book's fold-out endpaper.",
+      "palette": [
+        "#F4F3F1",
+        "#16161A",
+        "#6E6E73",
+        "#D2351C"
+      ],
+      "materials": [
+        "uncoated stock",
+        "hairline rules"
+      ],
+      "viewport": "Light map full-bleed above; below, an index sheet of numbered photo plates (P.01\u2026) with small-caps hairline captions; red registration dots mark the top-ranked.",
+      "risk": "Quiet by design \u2014 it lives or dies on the photographs carrying the page.",
+      "raised": [
+        {
+          "from": "crouwel-grid-specimen",
+          "raise": "Crouwel's armature: every element snaps to one strict visible grid; hierarchy by scale contrast alone."
+        },
+        {
+          "from": "dark-first-developer-console",
+          "raise": "Console's seams: panels divide by 1px hairline rules \u2014 zero drop shadows anywhere in the app."
+        },
+        {
+          "from": "botanical-folio",
+          "raise": "Folio's registration: every spot photo appears at identical crop and scale in lists, so images compare honestly."
+        },
+        {
+          "from": "variable-font-specimen",
+          "raise": "Specimen's readouts: distance, rank and score set in tabular figures that update in place."
+        }
+      ],
+      "wireframe": {
+        "cols": 12,
+        "rows": 10,
+        "regions": [
+          {
+            "label": "wordmark 'PhotoSpot' + hairline",
+            "x": 0,
+            "y": 0,
+            "w": 12,
+            "h": 1
+          },
+          {
+            "label": "LIGHT map, 6 circular photo pins, 2 red rank dots",
+            "x": 0,
+            "y": 1,
+            "w": 12,
+            "h": 5,
+            "accent": true
+          },
+          {
+            "label": "small-caps 'TOP PLATES NEAR YOU' + 1px rule",
+            "x": 0,
+            "y": 6,
+            "w": 12,
+            "h": 1
+          },
+          {
+            "label": "P.01 photo plate + tabular caption",
+            "x": 0,
+            "y": 7,
+            "w": 12,
+            "h": 1
+          },
+          {
+            "label": "P.02 photo plate + tabular caption",
+            "x": 0,
+            "y": 8,
+            "w": 12,
+            "h": 1
+          },
+          {
+            "label": "P.03 photo plate + red registration dot",
+            "x": 0,
+            "y": 9,
+            "w": 12,
+            "h": 1
+          },
+          {
+            "label": "tabs Map/Saved/Submit",
+            "x": 0,
+            "y": 9.6,
+            "w": 12,
+            "h": 0.4
+          }
+        ]
+      }
+    },
+    {
+      "id": "model-pick",
+      "label": "The Contact Sheet",
+      "kicker": "IMPECCABLE'S PICK",
+      "lineage": "darkroom contact sheets, grease-pencil selection",
+      "thesis": "The whole app as one contact sheet: every spot a frame, the best circled in red.",
+      "palette": [
+        "#0E0E0E",
+        "#E8E6E1",
+        "#D2351C"
+      ],
+      "materials": [
+        "tri-x film",
+        "grease pencil"
+      ],
+      "viewport": "Map as the lit sheet; frames numbered in white along the edge; red grease-pencil circles ring the top-ranked spots.",
+      "risk": "The most familiar choice in photography \u2014 film nostalgia is the shortcut every photo app takes.",
+      "wireframe": {
+        "cols": 12,
+        "rows": 10,
+        "regions": [
+          {
+            "label": "wordmark + film edge numbers",
+            "x": 0,
+            "y": 0,
+            "w": 12,
+            "h": 1
+          },
+          {
+            "label": "dark map, white-ringed pins, 2 red grease circles",
+            "x": 0,
+            "y": 1,
+            "w": 12,
+            "h": 5,
+            "accent": true
+          },
+          {
+            "label": "small-caps 'CONTACT SHEET \u2014 LISBOA'",
+            "x": 0,
+            "y": 6,
+            "w": 12,
+            "h": 1
+          },
+          {
+            "label": "thumb grid, frame numbers, red marks",
+            "x": 0,
+            "y": 7,
+            "w": 12,
+            "h": 2.6
+          },
+          {
+            "label": "tabs with red underline",
+            "x": 0,
+            "y": 9.6,
+            "w": 12,
+            "h": 0.4
+          }
+        ]
+      }
+    },
+    {
+      "id": "challenger-orienteering",
+      "label": "The Orienteering Course",
+      "verdict": "competitive",
+      "lineage": "iso-standard orienteering maps",
+      "thesis": "Spots as numbered controls; the legend ranks them and purple marks only your active leg.",
+      "palette": [
+        "#FFFFFF",
+        "#A8B84A",
+        "#6B4A2B",
+        "#7B3FA0"
+      ],
+      "materials": [
+        "isom inks",
+        "contour lines"
+      ],
+      "viewport": "Terrain-color map with numbered control circles; the sheet below reads as the control-description table.",
+      "risk": "Terrain colors can swallow the photographs if the iso palette runs the page.",
+      "case": "Fuses cleanly: spots become numbered controls and the legend ranks them; loses narrowly on audience identification \u2014 photographers don't read isometric notation.",
+      "hero": "https://impeccable.style/worlds/cards/notation-diagram-systems-orienteering-map-hero.webp",
+      "board": "https://impeccable.style/worlds/cards/notation-diagram-systems-orienteering-map.webp",
+      "wireframe": {
+        "cols": 12,
+        "rows": 10,
+        "regions": [
+          {
+            "label": "wordmark",
+            "x": 0,
+            "y": 0,
+            "w": 12,
+            "h": 1
+          },
+          {
+            "label": "The Orienteering Course: map region with signature markers",
+            "x": 0,
+            "y": 1,
+            "w": 12,
+            "h": 5,
+            "accent": true
+          },
+          {
+            "label": "index/list in the world's grammar",
+            "x": 0,
+            "y": 6,
+            "w": 12,
+            "h": 3.6
+          },
+          {
+            "label": "tabs",
+            "x": 0,
+            "y": 9.6,
+            "w": 12,
+            "h": 0.4
+          }
+        ]
+      }
+    },
+    {
+      "id": "challenger-doujin",
+      "label": "The Convention Catalog",
+      "verdict": "competitive",
+      "lineage": "newsprint event catalogs with hall maps",
+      "thesis": "Thumbnail grid and map are one space: every frame carries a table code that locates it.",
+      "palette": [
+        "#EFECE2",
+        "#141414",
+        "#C2321F"
+      ],
+      "materials": [
+        "newsprint",
+        "single-ink halftone"
+      ],
+      "viewport": "Map above keyed to codes; below, postage-stamp photo thumbnails packed edge to edge, each with its code and a circled top pick.",
+      "risk": "Density turns to noise below a strict thumbnail grid.",
+      "case": "Fuses well: catalog grid and hall map are literally our browse model; loses on identification \u2014 newsprint catalog culture isn't the photographer's world.",
+      "hero": "https://impeccable.style/worlds/cards/pop-culture-shelf-doujin-event-catalog-hero.webp",
+      "board": "https://impeccable.style/worlds/cards/pop-culture-shelf-doujin-event-catalog.webp",
+      "wireframe": {
+        "cols": 12,
+        "rows": 10,
+        "regions": [
+          {
+            "label": "wordmark",
+            "x": 0,
+            "y": 0,
+            "w": 12,
+            "h": 1
+          },
+          {
+            "label": "The Convention Catalog: map region with signature markers",
+            "x": 0,
+            "y": 1,
+            "w": 12,
+            "h": 5,
+            "accent": true
+          },
+          {
+            "label": "index/list in the world's grammar",
+            "x": 0,
+            "y": 6,
+            "w": 12,
+            "h": 3.6
+          },
+          {
+            "label": "tabs",
+            "x": 0,
+            "y": 9.6,
+            "w": 12,
+            "h": 0.4
+          }
+        ]
+      }
+    },
+    {
+      "id": "challenger-crouwel",
+      "label": "Grid Specimen",
+      "verdict": "declined",
+      "lineage": "Wim Crouwel type specimens",
+      "thesis": "Letterforms built cell by cell on a visible construction grid.",
+      "palette": [
+        "#FFFFFF",
+        "#1B1B1B",
+        "#0033CC"
+      ],
+      "materials": [
+        "construction grid hairlines"
+      ],
+      "viewport": "The map and index snapped to a visible blue armature.",
+      "risk": "Reads as a design exercise before it reads as a photo map.",
+      "case": "Loses both axes: designers know Crouwel, photographers don't; the grid helps layout but hides the photographs.",
+      "kept": "The visible armature: everything snaps to one strict grid.",
+      "hero": "https://impeccable.style/worlds/cards/crouwel-grid-specimen-hero.webp",
+      "wireframe": {
+        "cols": 12,
+        "rows": 10,
+        "regions": [
+          {
+            "label": "wordmark",
+            "x": 0,
+            "y": 0,
+            "w": 12,
+            "h": 1
+          },
+          {
+            "label": "Grid Specimen: map region with signature markers",
+            "x": 0,
+            "y": 1,
+            "w": 12,
+            "h": 5,
+            "accent": true
+          },
+          {
+            "label": "index/list in the world's grammar",
+            "x": 0,
+            "y": 6,
+            "w": 12,
+            "h": 3.6
+          },
+          {
+            "label": "tabs",
+            "x": 0,
+            "y": 9.6,
+            "w": 12,
+            "h": 0.4
+          }
+        ]
+      }
+    },
+    {
+      "id": "challenger-console",
+      "label": "Graphite Console",
+      "verdict": "declined",
+      "lineage": "dark-first developer consoles",
+      "thesis": "Graphite panels divided by hairline seams; destructive actions isolated in empty space.",
+      "palette": [
+        "#101216",
+        "#1A1D23",
+        "#4DD8C8"
+      ],
+      "materials": [
+        "hairline seams",
+        "panel elevation"
+      ],
+      "viewport": "Tiled panels of spot data on graphite.",
+      "risk": "This is the neighborhood of the AI-slop look the brief rejects.",
+      "case": "Loses both: no photographer identifies with a terminal, and panels bury the images that are the product.",
+      "kept": "Seams, not shadows: 1px hairline rules divide panels.",
+      "hero": "https://impeccable.style/worlds/cards/digital-design-canon-dark-first-developer-console-hero.webp",
+      "wireframe": {
+        "cols": 12,
+        "rows": 10,
+        "regions": [
+          {
+            "label": "wordmark",
+            "x": 0,
+            "y": 0,
+            "w": 12,
+            "h": 1
+          },
+          {
+            "label": "Graphite Console: map region with signature markers",
+            "x": 0,
+            "y": 1,
+            "w": 12,
+            "h": 5,
+            "accent": true
+          },
+          {
+            "label": "index/list in the world's grammar",
+            "x": 0,
+            "y": 6,
+            "w": 12,
+            "h": 3.6
+          },
+          {
+            "label": "tabs",
+            "x": 0,
+            "y": 9.6,
+            "w": 12,
+            "h": 0.4
+          }
+        ]
+      }
+    },
+    {
+      "id": "challenger-botanical",
+      "label": "Botanical Folio",
+      "verdict": "declined",
+      "lineage": "botanical folios with registered plates",
+      "thesis": "Five fixed-scale plates on one shared baseline, captions ranked beneath.",
+      "palette": [
+        "#F7F4EC",
+        "#2E3B2A",
+        "#8B2F1E"
+      ],
+      "materials": [
+        "sepia rules",
+        "plate registration"
+      ],
+      "viewport": "Spot photos aligned at identical scale like specimen plates.",
+      "risk": "Scientific register can cool off the joy of shooting.",
+      "case": "Loses both: a botanist's folio isn't a photographer's ritual, and fixed plates fight the map's spontaneity.",
+      "kept": "Fixed-scale registration: images compared at identical size.",
+      "hero": "https://impeccable.style/worlds/cards/editorial-sequence-montage-botanical-folio-season-hero.webp",
+      "wireframe": {
+        "cols": 12,
+        "rows": 10,
+        "regions": [
+          {
+            "label": "wordmark",
+            "x": 0,
+            "y": 0,
+            "w": 12,
+            "h": 1
+          },
+          {
+            "label": "Botanical Folio: map region with signature markers",
+            "x": 0,
+            "y": 1,
+            "w": 12,
+            "h": 5,
+            "accent": true
+          },
+          {
+            "label": "index/list in the world's grammar",
+            "x": 0,
+            "y": 6,
+            "w": 12,
+            "h": 3.6
+          },
+          {
+            "label": "tabs",
+            "x": 0,
+            "y": 9.6,
+            "w": 12,
+            "h": 0.4
+          }
+        ]
+      }
+    },
+    {
+      "id": "challenger-variable",
+      "label": "Variable Specimen",
+      "verdict": "declined",
+      "lineage": "interactive type specimen pages",
+      "thesis": "One slider morphs a whole grid of glyphs with a live mono readout.",
+      "palette": [
+        "#FAFAF8",
+        "#111111",
+        "#FF5C00"
+      ],
+      "materials": [
+        "flat ink",
+        "axis sliders"
+      ],
+      "viewport": "Giant display glyphs over a live value readout.",
+      "risk": "Type as the subject displaces the photographs.",
+      "case": "Loses both: type designers identify, photographers don't; a morphing glyph grid is not the job of finding a spot.",
+      "kept": "Live tabular readouts for every measured value.",
+      "hero": "https://impeccable.style/worlds/cards/variable-font-specimen-hero.webp",
+      "wireframe": {
+        "cols": 12,
+        "rows": 10,
+        "regions": [
+          {
+            "label": "wordmark",
+            "x": 0,
+            "y": 0,
+            "w": 12,
+            "h": 1
+          },
+          {
+            "label": "Variable Specimen: map region with signature markers",
+            "x": 0,
+            "y": 1,
+            "w": 12,
+            "h": 5,
+            "accent": true
+          },
+          {
+            "label": "index/list in the world's grammar",
+            "x": 0,
+            "y": 6,
+            "w": 12,
+            "h": 3.6
+          },
+          {
+            "label": "tabs",
+            "x": 0,
+            "y": 9.6,
+            "w": 12,
+            "h": 0.4
+          }
+        ]
+      }
+    }
+  ],
+  "reroll": {
+    "registers": [
+      "safer",
+      "bolder"
+    ]
+  },
+  "buildPath": {
+    "value": "code",
+    "toggle": false
+  },
+  "canon": true,
+  "canonCard": {
+    "label": "The category standard",
+    "thesis": "What photo-map apps ship today, executed flawlessly.",
+    "palette": [
+      "#FFFFFF",
+      "#111827",
+      "#2563EB"
+    ],
+    "materials": [
+      "clean grid",
+      "floating cards"
+    ],
+    "viewport": "Light map, rounded floating photo cards, blue actions.",
+    "risk": "Indistinguishable from the competition by design.",
+    "wireframe": {
+      "cols": 12,
+      "rows": 10,
+      "regions": [
+        {
+          "label": "rounded search bar",
+          "x": 0,
+          "y": 0,
+          "w": 12,
+          "h": 1
+        },
+        {
+          "label": "light map + floating rounded photo cards",
+          "x": 0,
+          "y": 1,
+          "w": 12,
+          "h": 5,
+          "accent": true
+        },
+        {
+          "label": "rounded card carousel",
+          "x": 0,
+          "y": 6,
+          "w": 12,
+          "h": 3.6
+        },
+        {
+          "label": "4-icon tab bar",
+          "x": 0,
+          "y": 9.6,
+          "w": 12,
+          "h": 0.4
+        }
+      ]
+    }
+  },
+  "steer": true
+}
