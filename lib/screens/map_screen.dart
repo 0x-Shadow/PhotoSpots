@@ -2,9 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:provider/provider.dart';
-import 'package:url_launcher/url_launcher.dart';
-
 import '../models/spot.dart';
+import '../map/map_tile_layers.dart';
+import '../map/tile_sources.dart';
 import '../state/app_state.dart';
 import '../state/settings_state.dart';
 import '../theme/app_animations.dart';
@@ -35,6 +35,55 @@ class _MapScreenState extends State<MapScreen> {
   _MapSort _sort = _MapSort.nearest;
   bool _mapReady = false;
   LatLng? _lastCenteredLocation;
+
+  /// The basemap actually rendered: the preferred style unless the probe
+  /// found it unusable and the session fell back.
+  MapStyle _activeStyle = TileSources.dark;
+  String? _preferredUrl;
+  String? _fallbackNotice;
+  bool _tilesFailed = false;
+  final _tilesKey = GlobalKey<MapTileLayersState>();
+
+  /// Re-reads the preferred style when Settings changes it, so a style picked
+  /// there takes over and any session fallback is dropped.
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final preferred = context.watch<SettingsState>().activeMapStyle;
+    if (_preferredUrl == null || preferred.urlTemplate != _preferredUrl) {
+      _preferredUrl = preferred.urlTemplate;
+      _activeStyle = preferred;
+      _fallbackNotice = null;
+      _tilesFailed = false;
+    }
+  }
+
+  /// The probe could not use the active style: either fall back to the street
+  /// style or, when that has already failed too, show the failure panel.
+  void _onFallback(String styleId) {
+    final settings = context.read<SettingsState>();
+    setState(() {
+      if (styleId == _activeStyle.id || settings.mapStyle == styleId) {
+        _tilesFailed = true;
+        return;
+      }
+      _activeStyle = TileSources.byId(styleId, cartoApiKey: settings.cartoApiKey);
+      _fallbackNotice = 'Basemap unavailable — using OpenStreetMap.';
+      _tilesFailed = false;
+    });
+  }
+
+  /// Re-probes the preferred style from scratch.
+  void _retryTiles() {
+    final settings = context.read<SettingsState>();
+    setState(() {
+      _activeStyle = settings.activeMapStyle;
+      _preferredUrl = _activeStyle.urlTemplate;
+      _fallbackNotice = null;
+      _tilesFailed = false;
+    });
+    _tilesKey.currentState?.retry();
+  }
 
   /// Moves the camera only once the map has been laid out, so an early tap or
   /// a location fix that arrives during startup cannot throw.
@@ -239,12 +288,10 @@ class _MapScreenState extends State<MapScreen> {
               },
             ),
             children: [
-              TileLayer(
-                urlTemplate: 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
-                subdomains: const ['a', 'b', 'c', 'd'],
-                userAgentPackageName: 'com.photospot.app',
-                maxZoom: 18,
-                retinaMode: RetinaMode.isHighDensity(context),
+              MapTileLayers(
+                key: _tilesKey,
+                style: _activeStyle,
+                onFallback: _onFallback,
               ),
               MarkerLayer(
                 markers: [
@@ -272,22 +319,7 @@ class _MapScreenState extends State<MapScreen> {
                     ),
                 ],
               ),
-              RichAttributionWidget(
-                alignment: AttributionAlignment.bottomLeft,
-                attributions: [
-                  TextSourceAttribution(
-                    'OpenStreetMap contributors',
-                    onTap: () => launchUrl(
-                      Uri.parse('https://www.openstreetmap.org/copyright'),
-                    ),
-                  ),
-                  TextSourceAttribution(
-                    'CARTO',
-                    onTap: () =>
-                        launchUrl(Uri.parse('https://carto.com/attributions')),
-                  ),
-                ],
-              ),
+              MapAttribution(style: _activeStyle),
             ],
           ),
         ),
@@ -369,40 +401,46 @@ class _MapScreenState extends State<MapScreen> {
           ),
         ),
 
-        // A short status moment prevents the map from feeling like an empty,
-        // unresponsive canvas while the first tiles arrive.
+        // One status slot so the loading chip, the fallback notice and the
+        // failure panel can never stack on top of each other.
         Positioned(
           top: 116,
-          left: 0,
-          right: 0,
-          child: IgnorePointer(
-            child: AnimatedOpacity(
-              duration: AppMotion.instant,
-              opacity: _mapReady ? 0 : 1,
-              child: Center(
-                child: Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 12,
-                    vertical: 7,
-                  ),
-                  decoration: BoxDecoration(
-                    color: const Color(0xE61A1A1D),
-                    borderRadius: BorderRadius.circular(999),
-                    border: Border.all(color: AppColors.hairline),
-                  ),
-                  child: const Text(
-                    'Loading your map…',
-                    style: TextStyle(
-                      color: AppColors.textSecondary,
-                      fontFamily: 'Inter',
-                      fontSize: 12,
-                      fontWeight: FontWeight.w600,
+          left: 24,
+          right: 24,
+          child: _tilesFailed
+              ? MapUnavailableView(
+                  styleLabel: _activeStyle.label,
+                  onRetry: _retryTiles,
+                )
+              : _fallbackNotice != null
+              ? _FallbackNotice(
+                  text: _fallbackNotice!,
+                  onDismiss: () => setState(() => _fallbackNotice = null),
+                )
+              : IgnorePointer(
+                  child: AnimatedOpacity(
+                    duration: AppMotion.instant,
+                    opacity: _mapReady ? 0 : 1,
+                    child: Center(
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 7,
+                        ),
+                        decoration: BoxDecoration(
+                          color: const Color(0xE61A1A1D),
+                          borderRadius: BorderRadius.circular(999),
+                          border: Border.all(color: AppColors.hairline),
+                        ),
+                        child: Text(
+                          'Loading your map…',
+                          style: Theme.of(context).textTheme.labelLarge
+                              ?.copyWith(color: AppColors.textSecondary),
+                        ),
+                      ),
                     ),
                   ),
                 ),
-              ),
-            ),
-          ),
         ),
 
         // Filter chips.
@@ -646,6 +684,58 @@ class _MapScreenState extends State<MapScreen> {
         ],
       ),
       child: Icon(style.icon, color: Colors.white, size: 17),
+    );
+  }
+}
+
+/// A dismissible chip explaining that the basemap fell back for this session.
+class _FallbackNotice extends StatelessWidget {
+  const _FallbackNotice({required this.text, required this.onDismiss});
+
+  final String text;
+  final VoidCallback onDismiss;
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: Container(
+        padding: const EdgeInsets.only(left: 14, right: 4, top: 4, bottom: 4),
+        decoration: BoxDecoration(
+          color: const Color(0xE61A1A1D),
+          borderRadius: BorderRadius.circular(999),
+          border: Border.all(color: AppColors.hairline),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Flexible(
+              child: Text(
+                text,
+                style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                  color: AppColors.textSecondary,
+                ),
+              ),
+            ),
+            const SizedBox(width: 6),
+            Semantics(
+              button: true,
+              label: 'Dismiss',
+              child: InkWell(
+                onTap: onDismiss,
+                customBorder: const CircleBorder(),
+                child: const Padding(
+                  padding: EdgeInsets.all(6),
+                  child: Icon(
+                    Icons.close_rounded,
+                    size: 16,
+                    color: AppColors.textSecondary,
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }

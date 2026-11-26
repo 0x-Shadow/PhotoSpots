@@ -5,11 +5,13 @@ import 'package:flutter_map/flutter_map.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:provider/provider.dart';
-import 'package:url_launcher/url_launcher.dart';
 
 import '../app_info.dart';
 import '../data/spot_repository.dart';
+import '../map/map_tile_layers.dart';
+import '../map/tile_sources.dart';
 import '../state/app_state.dart';
+import '../state/settings_state.dart';
 import '../theme/app_animations.dart';
 import '../theme/app_theme.dart';
 import '../utils/format.dart';
@@ -847,6 +849,10 @@ class _LocationStepState extends State<_LocationStep> {
   final _mapController = MapController();
   late LatLng _center;
 
+  /// Set once the preferred basemap turns out to be unusable, so this
+  /// mini-map swaps to the street style for the rest of the session.
+  bool _streetFallback = false;
+
   @override
   void initState() {
     super.initState();
@@ -929,29 +935,19 @@ class _LocationStepState extends State<_LocationStep> {
                   },
                 ),
                 children: [
-                  TileLayer(
-                    urlTemplate: 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
-                    subdomains: const ['a', 'b', 'c', 'd'],
-                    userAgentPackageName: 'com.photospot.app',
-                    maxZoom: 18,
-                    retinaMode: RetinaMode.isHighDensity(context),
+                  MapTileLayers(
+                    style: _streetFallback
+                        ? TileSources.street
+                        : context.watch<SettingsState>().activeMapStyle,
+                    onFallback: (id) {
+                      if (_streetFallback) return;
+                      setState(() => _streetFallback = true);
+                    },
                   ),
-                  RichAttributionWidget(
-                    alignment: AttributionAlignment.bottomLeft,
-                    attributions: [
-                      TextSourceAttribution(
-                        'OpenStreetMap contributors',
-                        onTap: () => launchUrl(
-                          Uri.parse('https://www.openstreetmap.org/copyright'),
-                        ),
-                      ),
-                      TextSourceAttribution(
-                        'CARTO',
-                        onTap: () => launchUrl(
-                          Uri.parse('https://carto.com/attributions'),
-                        ),
-                      ),
-                    ],
+                  MapAttribution(
+                    style: _streetFallback
+                        ? TileSources.street
+                        : context.watch<SettingsState>().activeMapStyle,
                   ),
                 ],
               ),
