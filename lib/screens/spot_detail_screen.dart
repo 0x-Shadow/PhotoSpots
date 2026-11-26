@@ -185,7 +185,7 @@ class _SpotDetailScreenState extends State<SpotDetailScreen> {
                                     borderRadius: BorderRadius.circular(999),
                                     child: Container(
                                       constraints:
-                                          const BoxConstraints(minHeight: 34),
+                                          const BoxConstraints(minHeight: 44),
                                       padding: const EdgeInsets.symmetric(
                                           horizontal: 12, vertical: 6),
                                       decoration: BoxDecoration(

@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:url_launcher/url_launcher.dart';
 
 import '../services/update_service.dart';
 import '../state/settings_state.dart';
@@ -71,6 +70,7 @@ class _UpdateGateState extends State<UpdateGate> {
 
     _sheetOpen = false;
 
+    if (action == UpdateAction.installStarted && !mounted) return;
     if (action == UpdateAction.installStarted) {
       messenger?.showSnackBar(
         const SnackBar(
@@ -81,31 +81,8 @@ class _UpdateGateState extends State<UpdateGate> {
     }
 
     if (action == UpdateAction.openPage) {
-      var opened = false;
-      try {
-        opened = await launchUrl(
-          release.pageUrl,
-          mode: LaunchMode.externalApplication,
-        );
-      } catch (_) {
-        opened = false;
-      }
-      if (!opened) {
-        try {
-          opened = await launchUrl(release.pageUrl);
-        } catch (_) {
-          opened = false;
-        }
-      }
-      if (!opened) {
-        messenger?.showSnackBar(
-          SnackBar(
-            content: SelectableText(
-              'Open ${release.pageUrl} to download version ${release.version}.',
-            ),
-          ),
-        );
-      }
+      if (!mounted) return;
+      await handleUpdateAction(context, release, action);
       return;
     }
 

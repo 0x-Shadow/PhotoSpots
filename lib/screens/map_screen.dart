@@ -191,7 +191,7 @@ class _MapScreenState extends State<MapScreen> {
 
   Future<void> _goToMyLocation() async {
     final state = context.read<AppState>();
-    final outcome = await runLocationFlow(context);
+    final outcome = await runLocationFlow(context, appState: state);
     if (!mounted) return;
 
     if (outcome != LocationOutcome.granted || state.userLocation == null) {
@@ -480,7 +480,7 @@ class _MapScreenState extends State<MapScreen> {
             child: Padding(
               padding: const EdgeInsets.only(top: 66),
               child: SizedBox(
-                height: 40,
+                height: 44,
                 child: ListView.separated(
                   scrollDirection: Axis.horizontal,
                   padding: const EdgeInsets.symmetric(horizontal: 16),
@@ -503,6 +503,7 @@ class _MapScreenState extends State<MapScreen> {
                       }),
                       child: AnimatedContainer(
                         duration: AppMotion.instant,
+                        constraints: const BoxConstraints(minHeight: 44),
                         padding: const EdgeInsets.symmetric(
                           horizontal: 15,
                           vertical: 7,
@@ -785,7 +786,7 @@ class _FallbackNotice extends StatelessWidget {
                 onTap: onDismiss,
                 customBorder: const CircleBorder(),
                 child: const Padding(
-                  padding: EdgeInsets.all(6),
+                  padding: EdgeInsets.all(14),
                   child: Icon(
                     Icons.close_rounded,
                     size: 16,

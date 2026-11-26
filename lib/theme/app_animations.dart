@@ -18,7 +18,8 @@ class AppMotion {
   static PageRouteBuilder<T> slideUp<T>(Widget page) {
     return PageRouteBuilder<T>(
       pageBuilder: (_, _, _) => page,
-      transitionsBuilder: (_, animation, _, child) {
+      transitionsBuilder: (context, animation, _, child) {
+        if (MediaQuery.disableAnimationsOf(context)) return child;
         final curved = CurvedAnimation(
           parent: animation,
           curve: easeOut,
@@ -44,7 +45,8 @@ class AppMotion {
   static PageRouteBuilder<T> slideUpModal<T>(Widget page) {
     return PageRouteBuilder<T>(
       pageBuilder: (_, _, _) => page,
-      transitionsBuilder: (_, animation, _, child) {
+      transitionsBuilder: (context, animation, _, child) {
+        if (MediaQuery.disableAnimationsOf(context)) return child;
         return SlideTransition(
           position: Tween<Offset>(
             begin: const Offset(0, 1),
@@ -174,7 +176,9 @@ class _PressButtonState extends State<PressButton>
   }
 
   void _onTapDown(TapDownDetails details) {
-    if (widget.enabled) _controller.forward();
+    if (widget.enabled && !MediaQuery.disableAnimationsOf(context)) {
+      _controller.forward();
+    }
   }
 
   void _onTapUp(TapUpDetails details) {
@@ -186,6 +190,7 @@ class _PressButtonState extends State<PressButton>
 
   @override
   Widget build(BuildContext context) {
+    final reduceMotion = MediaQuery.disableAnimationsOf(context);
     return Semantics(
       button: true,
       enabled: widget.enabled,
@@ -197,8 +202,10 @@ class _PressButtonState extends State<PressButton>
         onTapCancel: () => _controller.reverse(),
         child: AnimatedBuilder(
           animation: _scale,
-          builder: (context, child) =>
-              Transform.scale(scale: _scale.value, child: child),
+          builder: (context, child) => Transform.scale(
+            scale: reduceMotion ? 1.0 : _scale.value,
+            child: child,
+          ),
           child: widget.child,
         ),
       ),

@@ -94,7 +94,11 @@ Future<bool> showLocationRationale(BuildContext context) async {
 /// A plain snackbar leaves blocked users stuck: "Location permission was
 /// denied." tells them nothing about how to fix a permanent block. This sheet
 /// names the outcome and opens the settings page that can actually fix it.
-Future<void> showLocationRecovery(BuildContext context, LocationOutcome outcome) {
+Future<void> showLocationRecovery(
+  BuildContext context,
+  LocationOutcome outcome, {
+  VoidCallback? onRetry,
+}) {
   final openSettings = outcome == LocationOutcome.blocked ||
       outcome == LocationOutcome.servicesOff;
   final title = openSettings
@@ -163,6 +167,38 @@ Future<void> showLocationRecovery(BuildContext context, LocationOutcome outcome)
               ),
               const SizedBox(height: 8),
             ],
+            if (!openSettings) ...[
+              Semantics(
+                button: true,
+                child: InkWell(
+                  onTap: () {
+                    Navigator.of(sheetContext).pop();
+                    onRetry?.call();
+                  },
+                  borderRadius: BorderRadius.circular(AppLayout.radiusCard),
+                  child: Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                    alignment: Alignment.center,
+                    decoration: BoxDecoration(
+                      color: AppColors.action,
+                      borderRadius: BorderRadius.circular(AppLayout.radiusCard),
+                    ),
+                    child: Text(
+                      'Try again',
+                      style: Theme.of(sheetContext)
+                          .textTheme
+                          .labelLarge
+                          ?.copyWith(
+                            color: AppColors.onAction,
+                            fontWeight: FontWeight.w700,
+                          ),
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 8),
+            ],
             Semantics(
               button: true,
               child: InkWell(
@@ -198,24 +234,38 @@ Future<void> showLocationRecovery(BuildContext context, LocationOutcome outcome)
 Future<LocationOutcome> runLocationFlow(
   BuildContext context, {
   bool explain = true,
+  AppState? appState,
   Future<bool> Function()? needsRationale,
   Future<LocationOutcome> Function()? request,
 }) async {
   final undecided = needsRationale ??
       (() async => await Geolocator.checkPermission() == LocationPermission.denied);
   if (explain && await undecided()) {
-    if (!context.mounted) return LocationOutcome.failed;
-    if (!await showLocationRationale(context)) return LocationOutcome.denied;
+    if (!context.mounted) return LocationOutcome.denied;
+    if (!await showLocationRationale(context)) {
+      if (appState != null) {
+        appState.recordLocationOutcome(LocationOutcome.denied);
+      }
+      return LocationOutcome.denied;
+    }
   }
 
   if (!context.mounted) return LocationOutcome.failed;
-  final ask = request ?? context.read<AppState>().requestLocation;
+  final ask = request ?? (appState ?? context.read<AppState>()).requestLocation;
   final outcome = await ask();
+  appState?.recordLocationOutcome(outcome);
   if (!context.mounted) return outcome;
 
   if (outcome == LocationOutcome.servicesOff ||
       outcome == LocationOutcome.blocked) {
     await showLocationRecovery(context, outcome);
+  } else if (outcome == LocationOutcome.denied ||
+      outcome == LocationOutcome.failed) {
+    await showLocationRecovery(
+      context,
+      outcome,
+      onRetry: () => runLocationFlow(context, explain: false, appState: appState),
+    );
   }
   return outcome;
 }

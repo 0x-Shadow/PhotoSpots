@@ -24,7 +24,11 @@ import '../widgets/spot_details_form.dart';
 /// Three deliberate steps: photo, location, details. The city comes from the
 /// pin, never from a hardcoded default.
 class SubmitScreen extends StatefulWidget {
-  const SubmitScreen({super.key});
+  const SubmitScreen({super.key, this.initialStep = 0});
+
+  /// Optional entry step — tests use it to reach the map without faking the
+  /// platform photo picker.
+  final int initialStep;
 
   /// A cached user fix wins; otherwise the map's own centre is used. The demo
   /// seed is only a last resort for a map that has not laid out yet.
@@ -39,6 +43,10 @@ class SubmitScreen extends StatefulWidget {
 
 class _SubmitScreenState extends State<SubmitScreen> {
   int _step = 0;
+
+  /// True when the pin came from the demo seed rather than the user's last
+  /// fix, so the UI can say so instead of implying a real location.
+  bool _usingDemoSeed = false;
 
   final _draft = SpotDraftController();
   final _geocoder = const GeocodingService();
@@ -62,12 +70,14 @@ class _SubmitScreenState extends State<SubmitScreen> {
   @override
   void initState() {
     super.initState();
+    _step = widget.initialStep;
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
-      setState(
-        () => _pinned =
-            SubmitScreen.initialPin(context.read<AppState>()),
-      );
+      final state = context.read<AppState>();
+      setState(() {
+        _pinned = SubmitScreen.initialPin(state);
+        _usingDemoSeed = !state.hasCachedFix;
+      });
     });
   }
 
@@ -177,9 +187,9 @@ class _SubmitScreenState extends State<SubmitScreen> {
   }
 
   Future<void> _useMyLocation() async {
-    final outcome = await runLocationFlow(context);
-    if (!mounted || outcome != LocationOutcome.granted) return;
     final state = context.read<AppState>();
+    final outcome = await runLocationFlow(context, appState: state);
+    if (!mounted || outcome != LocationOutcome.granted) return;
     final position = state.userLocation;
     if (position == null) return;
     final point = LatLng(position.latitude, position.longitude);
@@ -407,6 +417,7 @@ class _SubmitScreenState extends State<SubmitScreen> {
           ),
         _ => _LocationStep(
             pinned: _pinned,
+            usingDemoSeed: _usingDemoSeed,
             address: _address,
             city: _draft.city,
             cityEditable: _cityManual,
@@ -702,6 +713,7 @@ class _PhotoSourceButton extends StatelessWidget {
 class _LocationStep extends StatelessWidget {
   const _LocationStep({
     required this.pinned,
+    required this.usingDemoSeed,
     required this.address,
     required this.city,
     required this.cityEditable,
@@ -719,6 +731,7 @@ class _LocationStep extends StatelessWidget {
   });
 
   final LatLng pinned;
+  final bool usingDemoSeed;
   final String address;
   final String city;
   final bool cityEditable;
@@ -744,6 +757,14 @@ class _LocationStep extends StatelessWidget {
     return ListView(
       padding: const EdgeInsets.fromLTRB(20, 8, 20, 20),
       children: [
+        if (usingDemoSeed)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 10),
+            child: Text(
+              'No saved location yet — showing the demo area.',
+              style: theme.bodySmall?.copyWith(color: AppColors.textSecondary),
+            ),
+          ),
         TextField(
           controller: searchController,
           onChanged: onSearch,
