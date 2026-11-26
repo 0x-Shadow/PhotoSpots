@@ -17,6 +17,7 @@ class SupabaseSpotRepository implements SpotRepository {
   SupabaseClient get _client => Supabase.instance.client;
 
   Future<String?>? _sessionFuture;
+  final Set<String> _profiledIds = {};
 
   /// The profile join must be named explicitly: `spots` and `profiles` are
   /// linked both by submitted_by and through saves, so an unqualified
@@ -28,10 +29,34 @@ class SupabaseSpotRepository implements SpotRepository {
   ''';
 
   /// Returns a user id, creating an anonymous session on first write.
-  Future<String?> _ensureUserId() {
-    final existing = _client.auth.currentUser?.id;
-    if (existing != null) return Future.value(existing);
-    return _sessionFuture ??= _signInAnonymously();
+  Future<String?> _ensureUserId() async {
+    final userId =
+        _client.auth.currentUser?.id ??
+        await (_sessionFuture ??= _signInAnonymously());
+    if (userId == null) return null;
+    await _ensureProfile(userId);
+    return userId;
+  }
+
+  /// Every write references profiles (spots.submitted_by, photos.uploader,
+  /// saves.user_id, spot_views.viewer), but the on_auth_user_created trigger
+  /// does not reliably fire for anonymous sessions. Without the row, inserts
+  /// fail with a foreign key violation, so create it from the client.
+  Future<void> _ensureProfile(String userId) async {
+    if (!_profiledIds.add(userId)) return;
+    try {
+      await _client
+          .from('profiles')
+          .upsert(
+            {'id': userId, 'display_name': 'Explorer'},
+            onConflict: 'id',
+            ignoreDuplicates: true,
+          );
+    } catch (_) {
+      // Not fatal for reads, and a retry is cheap: drop the cache entry so the
+      // next write tries again.
+      _profiledIds.remove(userId);
+    }
   }
 
   Future<String?> _signInAnonymously() async {
@@ -81,10 +106,10 @@ class SupabaseSpotRepository implements SpotRepository {
     if (userId == null) return false;
 
     if (saved) {
-      await _client.from('saves').upsert(
-        {'user_id': userId, 'spot_id': spot.id},
-        onConflict: 'user_id,spot_id',
-      );
+      await _client.from('saves').upsert({
+        'user_id': userId,
+        'spot_id': spot.id,
+      }, onConflict: 'user_id,spot_id');
     } else {
       await _client
           .from('saves')
@@ -125,10 +150,7 @@ class SupabaseSpotRepository implements SpotRepository {
     // Upload first so a storage failure cannot leave a duplicate spot behind.
     String? photoUrl;
     if (photoBytes != null && photoBytes.isNotEmpty) {
-      photoUrl = await uploadPhoto(
-        bytes: photoBytes,
-        userId: userId,
-      );
+      photoUrl = await uploadPhoto(bytes: photoBytes, userId: userId);
     }
 
     final response = await _client
@@ -173,7 +195,9 @@ class SupabaseSpotRepository implements SpotRepository {
   }) async {
     final fileName =
         'spots/$userId/${DateTime.now().millisecondsSinceEpoch}.jpg';
-    await _client.storage.from('photos').uploadBinary(
+    await _client.storage
+        .from('photos')
+        .uploadBinary(
           fileName,
           bytes,
           fileOptions: const FileOptions(contentType: 'image/jpeg'),
@@ -185,15 +209,17 @@ class SupabaseSpotRepository implements SpotRepository {
     final rawPhotos = (row['photos'] as List?) ?? const [];
     final photos = rawPhotos
         .map((p) => Map<String, dynamic>.from(p as Map))
-        .map((p) => SpotPhoto(
-              id: p['id']?.toString() ?? '',
-              url: p['image_url']?.toString() ?? '',
-              caption: p['caption'] as String?,
-              uploadedBy: p['uploader']?.toString(),
-              takenAt: p['taken_at'] != null
-                  ? DateTime.tryParse(p['taken_at'].toString())
-                  : null,
-            ))
+        .map(
+          (p) => SpotPhoto(
+            id: p['id']?.toString() ?? '',
+            url: p['image_url']?.toString() ?? '',
+            caption: p['caption'] as String?,
+            uploadedBy: p['uploader']?.toString(),
+            takenAt: p['taken_at'] != null
+                ? DateTime.tryParse(p['taken_at'].toString())
+                : null,
+          ),
+        )
         .where((photo) => photo.url.isNotEmpty)
         .toList();
 
