@@ -79,22 +79,23 @@ void main() {
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 600));
 
-    // Profile and its sheets.
+    // Profile and its settings screen.
     await tester.tap(find.text('Profile').last);
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 600));
-    expect(find.text('My Collections'), findsOneWidget);
+    expect(find.text('Plan a trip'), findsOneWidget);
 
-    await tester.tap(find.byIcon(Icons.settings_rounded));
+    await tester.tap(find.bySemanticsLabel('Settings'));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 400));
-    expect(find.text('Preferences'), findsWidgets);
+    expect(find.text('Settings'), findsWidgets);
     expect(tester.takeException(), isNull);
-    await tester.tapAt(const Offset(8, 8));
+    tester.state<NavigatorState>(find.byType(Navigator)).pop();
+    await tester.pump();
     await tester.pump(const Duration(milliseconds: 400));
 
     // Plan trip screen.
-    await tester.tap(find.text('My Collections'));
+    await tester.tap(find.text('Plan a trip'));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 600));
     expect(find.text('Plan Your Trip'), findsOneWidget);
