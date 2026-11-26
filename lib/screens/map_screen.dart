@@ -6,6 +6,8 @@ import '../models/spot.dart';
 import '../map/map_tile_layers.dart';
 import '../map/tile_sources.dart';
 import '../state/app_state.dart';
+import '../state/location_outcome.dart';
+import '../widgets/location_prompt.dart';
 import '../state/settings_state.dart';
 import '../theme/app_animations.dart';
 import '../theme/app_theme.dart';
@@ -158,16 +160,10 @@ class _MapScreenState extends State<MapScreen> {
 
   Future<void> _goToMyLocation() async {
     final state = context.read<AppState>();
-    final messenger = ScaffoldMessenger.of(context);
-    final ok = await state.requestLocation();
+    final outcome = await runLocationFlow(context);
     if (!mounted) return;
 
-    if (!ok || state.userLocation == null) {
-      messenger.showSnackBar(
-        SnackBar(
-          content: Text(state.locationError ?? 'Location is unavailable.'),
-        ),
-      );
+    if (outcome != LocationOutcome.granted || state.userLocation == null) {
       return;
     }
 

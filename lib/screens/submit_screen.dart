@@ -11,10 +11,12 @@ import '../data/spot_repository.dart';
 import '../map/map_tile_layers.dart';
 import '../map/tile_sources.dart';
 import '../state/app_state.dart';
+import '../state/location_outcome.dart';
 import '../state/settings_state.dart';
 import '../theme/app_animations.dart';
 import '../theme/app_theme.dart';
 import '../utils/format.dart';
+import '../widgets/location_prompt.dart';
 
 /// A deliberately short publishing flow: choose the shot, then add just
 /// enough context to make it useful.
@@ -77,8 +79,8 @@ class _SubmitScreenState extends State<SubmitScreen> {
       final state = context.read<AppState>();
       _pinned = state.referenceLocation;
       if (!state.hasUserLocation) {
-        state.requestLocation().then((granted) {
-          if (mounted && granted) {
+        state.requestLocation().then((outcome) {
+          if (mounted && outcome == LocationOutcome.granted) {
             setState(
               () => _pinned = context.read<AppState>().referenceLocation,
             );
@@ -867,14 +869,10 @@ class _LocationStepState extends State<_LocationStep> {
 
   Future<void> _useMyLocation() async {
     final state = context.read<AppState>();
-    final messenger = ScaffoldMessenger.of(context);
-    final ok = await state.requestLocation();
+    final outcome = await runLocationFlow(context);
     if (!mounted) return;
 
-    if (!ok || state.userLocation == null) {
-      messenger.showSnackBar(
-        SnackBar(content: Text(state.locationError ?? 'Location unavailable.')),
-      );
+    if (outcome != LocationOutcome.granted || state.userLocation == null) {
       return;
     }
 

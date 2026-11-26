@@ -57,14 +57,53 @@ class _PhotoSpotAppState extends State<PhotoSpotApp> {
           create: (_) => SettingsState()..load(),
         ),
       ],
-      child: MaterialApp(
-        title: 'PhotoSpot',
-        debugShowCheckedModeBanner: false,
-        theme: AppTheme.dark,
-        home: const AppEntry(),
+      child: _LocationResumeObserver(
+        child: MaterialApp(
+          title: 'PhotoSpot',
+          debugShowCheckedModeBanner: false,
+          theme: AppTheme.dark,
+          home: const AppEntry(),
+        ),
       ),
     );
   }
+}
+
+/// A permission granted in system settings only takes effect after the app is
+/// resumed. Rechecking here means the user never has to come back and tap the
+/// location button again.
+class _LocationResumeObserver extends StatefulWidget {
+  const _LocationResumeObserver({required this.child});
+
+  final Widget child;
+
+  @override
+  State<_LocationResumeObserver> createState() => _LocationResumeObserverState();
+}
+
+class _LocationResumeObserverState extends State<_LocationResumeObserver>
+    with WidgetsBindingObserver {
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      context.read<AppState>().onAppResumed();
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) => widget.child;
 }
 
 /// Shows the first-launch splash once, then the app guarded by the update
