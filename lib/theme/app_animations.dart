@@ -59,7 +59,7 @@ class AppMotion {
   }
 
   /// Stagger delay for list items, capped so long lists never feel slow.
-  static Duration staggerDelay(int index, {int itemCount = 8}) {
+  static Duration staggerDelay(int index) {
     return Duration(milliseconds: (index * 45).clamp(0, 240));
   }
 }
@@ -102,12 +102,9 @@ class _RevealItemState extends State<RevealItem>
         .chain(CurveTween(curve: AppMotion.easeOut))
         .animate(_controller);
 
-    _delayTimer = Timer(
-      AppMotion.staggerDelay(widget.index, itemCount: widget.total),
-      () {
-        if (mounted) _controller.forward();
-      },
-    );
+    _delayTimer = Timer(AppMotion.staggerDelay(widget.index), () {
+      if (mounted) _controller.forward();
+    });
   }
 
   @override
