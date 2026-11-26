@@ -15,6 +15,7 @@ import '../utils/actions.dart';
 import '../utils/categories.dart';
 import '../utils/format.dart';
 import '../utils/navigation.dart';
+import '../utils/share.dart';
 import '../widgets/spot_image.dart';
 
 enum _MapSort { nearest, topRated, saved }
@@ -541,6 +542,41 @@ class _MapScreenState extends State<MapScreen> {
             ),
           ),
         ),
+
+        // Share sits one control above Go to my location and lifts with it.
+        if (state.hasReferenceFix)
+          AnimatedPositioned(
+            duration: AppMotion.quick,
+            curve: AppMotion.easeOut,
+            right: 16,
+            bottom: (selected != null ? 188 : 76) + 54,
+            child: PressButton(
+              semanticLabel: 'Share my location',
+              onTap: () {
+                final point = state.referenceLocation;
+                shareLocationLink(
+                  context,
+                  lat: point.latitude,
+                  lng: point.longitude,
+                  title: 'My location',
+                );
+              },
+              child: Container(
+                width: 46,
+                height: 46,
+                decoration: BoxDecoration(
+                  color: const Color(0xF20F0F11),
+                  borderRadius: BorderRadius.circular(14),
+                  border: Border.all(color: AppColors.hairline),
+                ),
+                child: const Icon(
+                  Icons.share_location_rounded,
+                  color: AppColors.textPrimary,
+                  size: 21,
+                ),
+              ),
+            ),
+          ),
 
         // Location button. Lifted above the floating spot card when one is
         // open so the two never overlap.
