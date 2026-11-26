@@ -65,6 +65,29 @@ jobs:
           channel: stable
           cache: true
 
+      # Every release must be signed with the same long-lived key, otherwise
+      # Android refuses to install the update over the previous version.
+      - name: Configure release signing
+        shell: bash
+        env:
+          KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          STORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          if [[ -z "$KEYSTORE_BASE64" ]]; then
+            echo "::error::ANDROID_KEYSTORE_BASE64 is not set; the APK would be debug-signed and could not update an installed app."
+            exit 1
+          fi
+          KEYSTORE="$RUNNER_TEMP/release-keystore.jks"
+          printf '%s' "$KEYSTORE_BASE64" | base64 --decode > "$KEYSTORE"
+          {
+            echo "KEYSTORE_PATH=$KEYSTORE"
+            echo "KEYSTORE_PASSWORD=$STORE_PASSWORD"
+            echo "KEYSTORE_ALIAS=$KEY_ALIAS"
+            echo "KEYSTORE_KEY_PASSWORD=$KEY_PASSWORD"
+          } >> "$GITHUB_ENV"
+
       - name: Build release APK
         shell: bash
         env:
