@@ -5,10 +5,12 @@ name: Publish release
 # channel on launch.
 #
 # Flow:
-#   1. Bump `version:` in pubspec.yaml and AppInfo.version.
-#   2. Commit and push to main (or push a `v*` tag).
-#   3. This job builds the release APK, creates `v<version>` if it does not
-#      exist yet, and uploads the APK to that release.
+#   Push to main (or push a `v*` tag). Nothing else is required: the job picks
+#   the next free patch version, stamps it into the APK, publishes the release
+#   and attaches the APK, which installed apps then offer as an in-app update.
+#
+#   `version:` in pubspec.yaml is the base version. If `v<version>` is already
+#   released, the patch number is increased until the tag is free.
 on:
   push:
     branches: [main]
@@ -31,15 +33,23 @@ jobs:
 
       - name: Resolve version tag
         id: version
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         shell: bash
         run: |
           if [[ "$GITHUB_REF" == refs/tags/* ]]; then
             TAG="$GITHUB_REF_NAME"
           else
-            VERSION=$(grep -E '^version:' pubspec.yaml | sed -E 's/^version:[[:space:]]*//; s/\+.*//')
-            TAG="v$VERSION"
+            BASE=$(grep -E '^version:' pubspec.yaml | sed -E 's/^version:[[:space:]]*//; s/\+.*//')
+            IFS='.' read -r MAJOR MINOR PATCH <<< "$BASE"
+            PATCH=${PATCH:-0}
+            while gh release view "v$MAJOR.$MINOR.$PATCH" >/dev/null 2>&1; do
+              PATCH=$((PATCH + 1))
+            done
+            TAG="v$MAJOR.$MINOR.$PATCH"
           fi
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
           echo "Releasing $TAG"
 
       - uses: actions/setup-java@v4
@@ -58,21 +68,22 @@ jobs:
       - name: Build release APK
         shell: bash
         env:
-          TAG: ${{ steps.version.outputs.tag }}
+          VERSION: ${{ steps.version.outputs.version }}
           BUILD_NUMBER: ${{ github.run_number }}
         run: |
           flutter pub get
           flutter build apk --release \
-            --build-name="${TAG#v}" \
-            --build-number="$BUILD_NUMBER"
+            --build-name="$VERSION" \
+            --build-number="$BUILD_NUMBER" \
+            --dart-define=APP_VERSION="$VERSION"
 
       - name: Rename APK
         id: apk
         shell: bash
         env:
-          TAG: ${{ steps.version.outputs.tag }}
+          VERSION: ${{ steps.version.outputs.version }}
         run: |
-          OUT="photospot-${TAG#v}.apk"
+          OUT="photospot-${VERSION}.apk"
           cp build/app/outputs/flutter-apk/app-release.apk "$OUT"
           echo "path=$OUT" >> "$GITHUB_OUTPUT"
 

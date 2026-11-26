@@ -1,4 +1,6 @@
+import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:http/http.dart' as http;
 
@@ -11,6 +13,8 @@ class ReleaseInfo {
     required this.version,
     required this.notes,
     required this.pageUrl,
+    this.apkUrl,
+    this.apkSize,
   });
 
   /// Raw release tag, e.g. `v1.1.0`.
@@ -21,6 +25,16 @@ class ReleaseInfo {
 
   final String notes;
   final Uri pageUrl;
+
+  /// Direct download link for the Android package attached to the release, when
+  /// the release ships one. Lets the app install the update itself instead of
+  /// sending the user to a browser.
+  final Uri? apkUrl;
+
+  /// Declared size of [apkUrl] in bytes, used for the download progress bar.
+  final int? apkSize;
+
+  bool get canSelfUpdate => apkUrl != null;
 }
 
 /// Checks the public GitHub releases endpoint for a version newer than the
@@ -56,15 +70,110 @@ class UpdateService {
       final version = cleanVersion(tag);
       if (!isNewer(version, AppInfo.version)) return null;
 
+      final apk = _apkAsset(data['assets']);
+
       return ReleaseInfo(
         tag: tag,
         version: version,
         notes: (data['body'] as String? ?? '').trim(),
         pageUrl: AppInfo.releasesPage,
+        apkUrl: apk?.url,
+        apkSize: apk?.size,
       );
     } catch (_) {
       // Update checks are best effort and must never block startup.
       return null;
+    }
+  }
+
+  static _ApkAsset? _apkAsset(Object? assets) {
+    if (assets is! List) return null;
+    for (final asset in assets) {
+      if (asset is! Map) continue;
+      final name = (asset['name'] as String? ?? '').toLowerCase();
+      if (!name.endsWith('.apk')) continue;
+      final url = asset['browser_download_url'] as String? ?? '';
+      if (url.isEmpty) continue;
+      return _ApkAsset(
+        url: Uri.parse(url),
+        size: asset['size'] as int?,
+      );
+    }
+    return null;
+  }
+
+  /// Downloads the release APK to [target], reporting progress as it goes.
+  ///
+  /// Throws [UpdateDownloadException] with a user-safe message on failure. A
+  /// partially written file is removed so a retry never installs a truncated
+  /// package.
+  static Future<File> downloadApk(
+    ReleaseInfo release, {
+    required File target,
+    void Function(int received, int? total)? onProgress,
+    FutureOr<bool> Function()? isCancelled,
+  }) async {
+    final url = release.apkUrl;
+    if (url == null) throw const UpdateDownloadException('no-binary');
+
+    final client = http.Client();
+    IOSink? sink;
+    var success = false;
+    try {
+      final response = await client
+          .send(http.Request('GET', url))
+          .timeout(const Duration(seconds: 20));
+      if (response.statusCode != 200) {
+        throw UpdateDownloadException('status-${response.statusCode}');
+      }
+
+      final total = response.contentLength ?? release.apkSize;
+      if (target.existsSync()) target.deleteSync();
+      target.parent.createSync(recursive: true);
+      sink = target.openWrite();
+
+      var received = 0;
+      var lastReport = 0;
+      await for (final chunk in response.stream) {
+        if (isCancelled != null && await isCancelled()) {
+          throw const UpdateDownloadException('cancelled');
+        }
+        sink.add(chunk);
+        received += chunk.length;
+        if (onProgress != null &&
+            (received - lastReport > 256 * 1024 ||
+                (total != null && received >= total))) {
+          lastReport = received;
+          onProgress(received, total);
+        }
+      }
+
+      await sink.flush();
+      await sink.close();
+      sink = null;
+
+      if (total != null && received != total) {
+        throw const UpdateDownloadException('incomplete');
+      }
+
+      success = true;
+      return target;
+    } on UpdateDownloadException {
+      rethrow;
+    } catch (_) {
+      throw const UpdateDownloadException('network');
+    } finally {
+      client.close();
+      if (sink != null) {
+        try {
+          await sink.close();
+        } catch (_) {}
+      }
+      if (!success && target.existsSync()) {
+        try {
+          target.deleteSync();
+        } catch (_) {}
+      }
     }
   }
 
@@ -102,4 +211,23 @@ class UpdateService {
         .map((part) => int.tryParse(part.replaceAll(RegExp(r'\D'), '')) ?? 0)
         .toList();
   }
+}
+
+class _ApkAsset {
+  const _ApkAsset({required this.url, required this.size});
+
+  final Uri url;
+  final int? size;
+}
+
+/// Failure of an in-app update download, carrying a stable [reason] code.
+class UpdateDownloadException implements Exception {
+  const UpdateDownloadException(this.reason);
+
+  final String reason;
+
+  bool get isCancelled => reason == 'cancelled';
+
+  @override
+  String toString() => 'UpdateDownloadException($reason)';
 }

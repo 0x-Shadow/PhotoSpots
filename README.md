@@ -34,47 +34,52 @@ flutter run \
 Save and view counters are maintained by database triggers, so they cannot be
 overwritten by concurrent clients.
 
-## Releases and in-app upgrade prompt
+## Releases and in-app updates
 
-On launch the app asks the public GitHub Releases API for the latest release,
-compares it with `AppInfo.version`, and offers an upgrade when it is newer.
-"Later" snoozes that version for 24 hours. The check is controlled by
-**Profile → Preferences → Check for updates on launch**.
-
-To publish:
-
-1. Bump `version:` in `pubspec.yaml` **and** `AppInfo.version`.
-2. Commit and push — either a branch push to `main` or a `v*` tag creates the
-   release for that version:
+Publishing is one push. The `Publish release` workflow takes the base version
+from `pubspec.yaml`, bumps the patch number until the tag is free, builds the
+APK stamped with that version, and publishes the GitHub Release with
+`photospot-<version>.apk` attached:
 
 ```bash
-git commit -am "Release v1.0.4"
-git push origin main          # or: git tag v1.0.4 && git push origin --tags
+git commit -am "whatever changed"
+git push origin main
 ```
 
-The `Publish release` workflow builds the release APK and uploads it to the
-GitHub Release as `photospot-<version>.apk`, creating the release (and its tag)
-if it does not exist yet.
+So `version: 1.0.4+4` with `v1.0.4` already released produces `v1.0.5`, and the
+next push produces `v1.0.6`. Pushing a `v*` tag still publishes that exact tag.
 
-> The releases endpoint must be **publicly readable**. A private repository
-> returns 404 to unauthenticated clients, and an app cannot safely carry a
-> GitHub token. Either keep the release channel public, or point the app at a
-> public mirror of the release metadata:
->
-> ```bash
-> flutter build web --release \
->   --dart-define=RELEASES_API_URL=https://your-host/releases/latest.json \
->   --dart-define=RELEASES_PAGE_URL=https://your-host/downloads
-> ```
->
-> The JSON needs `tag_name` and `body`, matching GitHub's release shape.
+On launch the app asks the public GitHub Releases API for the latest release and
+compares it with `AppInfo.version`. When it is newer the update dialog offers
+**Update**, which downloads the release APK inside the app and hands it to the
+Android package installer — no browser, no GitHub, no manual download:
+
+- Progress is shown while downloading, and **Cancel** aborts cleanly.
+- Android needs the user to allow installs for PhotoSpot once
+  (`REQUEST_INSTALL_PACKAGES`); the dialog opens that setting and retries.
+- iOS cannot install an app bundle from a download, so the dialog opens the
+  release page there.
+- "Later" snoozes that release for 24 hours. The whole check is controlled by
+  **Profile → Preferences → Check for updates on launch**.
+
+The releases endpoint must stay **publicly readable**: a private repository
+returns 404 to unauthenticated clients, and the app cannot safely carry a
+GitHub token. A different host works through overrides, as long as its JSON
+keeps GitHub's shape (`tag_name`, `body`, `assets[].browser_download_url`):
+
+```bash
+flutter build apk --release \
+  --dart-define=RELEASES_API_URL=https://your-host/releases/latest.json \
+  --dart-define=RELEASES_PAGE_URL=https://your-host/downloads
+```
 
 ## Structure
 
 ```
 lib/
   app_info.dart              version + release channel
-  services/update_service.dart
+  services/update_service.dart  release lookup + APK download
+  services/apk_installer.dart   Android package-installer bridge
   data/                      SpotRepository, mock seed, Supabase implementation
   models/spot.dart           spot, photo, ranking score
   state/                     AppState (spots/saves/location), SettingsState
