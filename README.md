@@ -31,6 +31,16 @@ flutter run \
   --dart-define=SUPABASE_ANON_KEY=YOUR-ANON-KEY
 ```
 
+Release builds read the same two values from the repository secrets
+`SUPABASE_URL` and `SUPABASE_ANON_KEY`, so the published APK is connected to the
+backend without any local configuration. Without them the build ships in demo
+mode.
+
+**Anonymous sign-ins are required to publish.** The insert and storage policies
+grant writes to the `authenticated` role only, and the app creates an anonymous
+session on first write. If the provider is disabled, Supabase answers
+`anonymous_provider_disabled` and submitting a spot fails.
+
 Save and view counters are maintained by database triggers, so they cannot be
 overwritten by concurrent clients.
 
