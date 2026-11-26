@@ -1,43 +1,44 @@
 # PhotoSpot — Build Plan
 
-## Status: v1 BUILD COMPLETE — Professional Redesign Done
+## Status: v1 complete, redesigned against the `findr.` reference
 
-## What was rebuilt (findr. reference aesthetic)
+### Visual system
+Near-black ground, raised dark cards, hairline borders, pure white display type,
+white pill actions, amber ratings, dark CARTO map tiles. Reference-matched
+layouts for splash, home, map, spot detail, categories, saved, profile, and
+plan-your-trip. Motion is restrained: fade/slide routes and capped staggered
+list reveals, with reduced-motion support.
 
-**Visual world** — near-black ground (#0A0A0B), raised dark cards (#161618), 1px hairline borders, pure white display type (Inter), amber star ratings, white pill actions. Zero glow, zero glass, zero rounded floating cards — photos lead, chrome recedes.
+### Functional surface
+- Splash on first launch, then the tab shell (bottom tabs on phones, rail on
+  wide screens).
+- Home: trending spot, four category tiles, top picks nearby (real distance
+  ordering), live search screen.
+- Map: category icon pins, filter chips, sorting (nearest/rated/saved),
+  location button, floating spot card, save toggle.
+- Spot detail: gallery, facts, description, photo strip, tags, share (clipboard
+  link), directions (platform maps), save.
+- Saved: sorting, swipe-to-remove, local persistence across restarts.
+- Publish: four steps, photo required, gallery picker pinned map, review, upload
+  to Supabase Storage when configured; bytes are kept locally in demo mode.
+- Profile: real stats, preferences (updates/units/map pins), app settings and
+  manual update check, plan-your-trip itinerary.
+- Updates: public GitHub release check on launch with 24h snooze; tag-driven
+  release workflow.
 
-**Animations** (per impeccable/animate.md):
-- Page routes: slide-up + fade transitions
-- Staggered list reveals (slide-up + fade) on home categories, top picks, saved list, categories grid
-- Press feedback buttons (scale-down on tap)
-- Hero image transitions between map pin → spot detail gallery
+### Data
+`SpotRepository` with `MockSpotRepository` (12 Lisbon seed spots) and
+`SupabaseSpotRepository` (anonymous sessions, Postgres, Storage). Server-owned
+save/view counters via triggers. Saved IDs persist locally and sync to Supabase
+when a session exists.
 
-**Screens (all fully functional):**
-- **Home** — greeting, "Explore the best places." headline, Trending hero card, category tiles, Top Picks Nearby rail
-- **Map** — dark OSM map (no API key), circular photo pins with white rings, category badges, floating place card, white Get Directions pill, bookmark toggle
-- **Spot detail** — hero photo gallery with pagination, ★ rating + review count, 3 fact tiles (Best Time/Best Spot/Great For), description, photo strip, sticky action bar
-- **Saved** — photo rows with ratings, empty state
-- **Profile** — avatar, handle, Visited/Saved/Collections stats, account rows
-- **Submit** — 4-step flow: photo → details → pin drop → review/publish. Map picker has NO rotation (drag+zoom only). Photo upload from gallery.
-- **Categories** — photo card grid, filter by tag
-
-**Data layer:**
-- 10 curated Lisbon seed spots with real ratings, review counts, best-time tags
-- `SpotRepository` interface: `MockSpotRepository` (demo) / `SupabaseSpotRepository` (real)
-- `supabase_schema.sql` — ready to run in Supabase SQL editor
-- Photo upload to Supabase Storage (free tier)
-
-**Tech:** Flutter 3.47, flutter_map + OSM tiles (free, no key), provider, supabase_flutter, image_picker, url_launcher
-
-## Verification
+### Verification
 - `flutter analyze` — clean
-- `flutter test` — passing
+- `flutter test` — 19 tests passing (ranking, persistence, submit bytes,
+  version comparison, responsive flows)
 - `flutter build web --release` — succeeds
-- Live at http://192.168.1.18:8080/ (hard-refresh or incognito on phone)
 
-## To connect Supabase (real data + auth + photo uploads)
-1. Create free project at supabase.com
-2. Run `supabase_schema.sql` in SQL editor
-3. Create Storage bucket `photos` (public)
-4. Get URL + anon key from Project Settings → API
-5. Rebuild: `flutter build web --release --dart-define=SUPABASE_URL=... --dart-define=SUPABASE_ANON_KEY=...`
+### Known constraint
+The in-app update check needs a public release channel. The GitHub repo must be
+public, or `RELEASES_API_URL` / `RELEASES_PAGE_URL` must point at a public
+mirror. See README.

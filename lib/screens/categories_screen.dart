@@ -5,10 +5,13 @@ import '../models/spot.dart';
 import '../state/app_state.dart';
 import '../theme/app_animations.dart';
 import '../theme/app_theme.dart';
+import '../utils/categories.dart';
+import '../utils/format.dart';
 import '../widgets/saved_row.dart';
-import 'spot_detail_screen.dart';
+import '../widgets/state_views.dart';
+import 'search_screen.dart';
 
-/// Categories grid — the reference's photo-card grid with labels.
+/// Category grid plus an optional filtered list of spots.
 class CategoriesScreen extends StatelessWidget {
   const CategoriesScreen({
     super.key,
@@ -19,72 +22,114 @@ class CategoriesScreen extends StatelessWidget {
   final String? filterTag;
   final bool allOnly;
 
-  static const _categories = [
-    ('Sunset', 'Best sunset views', Icons.wb_sunny_outlined, 'sunset', AppColors.catSunset, 'sunset-a'),
-    ('Photography', 'Photo hotspots', Icons.photo_camera_rounded, 'skyline', AppColors.catPhoto, 'photo-a'),
-    ('Street', 'Urban exploring', Icons.directions_walk_rounded, 'street', AppColors.catDate, 'street-a'),
-    ('Architecture', 'Lines & light', Icons.apartment_rounded, 'architecture', AppColors.catFriends, 'arch-a'),
-    ('Relax', 'Peaceful places', Icons.spa_rounded, 'water', AppColors.catRelax, 'relax-a'),
-    ('Nightlife', 'After dark', Icons.nightlife_rounded, 'nightlife', AppColors.catNight, 'night-a'),
-  ];
-
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       body: SafeArea(
-        child: ListView(
-          padding: const EdgeInsets.fromLTRB(20, 12, 20, 120),
-          children: [
-            const SizedBox(height: 8),
-            const Text(
-              'Categories',
-              style: TextStyle(
-                color: AppColors.textPrimary,
-                fontSize: 28,
-                fontWeight: FontWeight.w800,
-                letterSpacing: -0.9,
-                fontFamily: 'Inter',
+        child: ResponsiveBody(
+          child: ListView(
+            padding: const EdgeInsets.fromLTRB(20, 8, 20, 120),
+            children: [
+              Row(
+                children: [
+                  PressButton(
+                    semanticLabel: 'Back',
+                    onTap: () => Navigator.of(context).maybePop(),
+                    child: Container(
+                      width: 40,
+                      height: 40,
+                      decoration: BoxDecoration(
+                        color: const Color(0x14FFFFFF),
+                        shape: BoxShape.circle,
+                        border: Border.all(color: AppColors.hairline),
+                      ),
+                      child: const Icon(Icons.arrow_back_rounded,
+                          color: AppColors.textPrimary, size: 20),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  const Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Categories',
+                          style: TextStyle(
+                            color: AppColors.textPrimary,
+                            fontSize: 28,
+                            fontWeight: FontWeight.w800,
+                            letterSpacing: -0.9,
+                            fontFamily: 'Inter',
+                          ),
+                        ),
+                        SizedBox(height: 2),
+                        Text(
+                          'Find the perfect vibe.',
+                          style: TextStyle(
+                            color: AppColors.textSecondary,
+                            fontSize: 14,
+                            fontFamily: 'Inter',
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  PressButton(
+                    semanticLabel: 'Search photo spots',
+                    onTap: () => Navigator.of(context)
+                        .push(AppMotion.slideUp(const SearchScreen())),
+                    child: Container(
+                      width: 44,
+                      height: 44,
+                      decoration: BoxDecoration(
+                        color: const Color(0x14FFFFFF),
+                        shape: BoxShape.circle,
+                        border: Border.all(color: AppColors.hairline),
+                      ),
+                      child: const Icon(Icons.search_rounded,
+                          color: AppColors.textPrimary, size: 21),
+                    ),
+                  ),
+                ],
               ),
-            ),
-            const SizedBox(height: 4),
-            const Text(
-              'Find the perfect vibe.',
-              style: TextStyle(color: AppColors.textSecondary, fontSize: 15, fontFamily: 'Inter'),
-            ),
-            const SizedBox(height: 22),
-            GridView.builder(
-              shrinkWrap: true,
-              physics: const NeverScrollableScrollPhysics(),
-              gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                crossAxisCount: 2,
-                crossAxisSpacing: 14,
-                mainAxisSpacing: 14,
-                childAspectRatio: 0.82,
+              const SizedBox(height: 20),
+              LayoutBuilder(
+                builder: (context, constraints) {
+                  final columns = constraints.maxWidth >= 700 ? 3 : 2;
+                  return GridView.builder(
+                    shrinkWrap: true,
+                    physics: const NeverScrollableScrollPhysics(),
+                    gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                      crossAxisCount: columns,
+                      crossAxisSpacing: 12,
+                      mainAxisSpacing: 12,
+                      childAspectRatio: 0.78,
+                    ),
+                    itemCount: spotCategories.length,
+                    itemBuilder: (_, i) {
+                      final category = spotCategories[i];
+                      return RevealItem(
+                        index: i,
+                        total: spotCategories.length,
+                        child: _CategoryCard(
+                          category: category,
+                          onTap: () => Navigator.of(context).push(
+                            AppMotion.slideUp(
+                              CategoriesScreen(filterTag: category.tag),
+                            ),
+                          ),
+                        ),
+                      );
+                    },
+                  );
+                },
               ),
-              itemCount: _categories.length,
-              itemBuilder: (_, i) {
-                return RevealItem(
-                  index: i,
-                  total: _categories.length,
-                  child: _CategoryCard(cat: _categories[i]),
-                );
-              },
-            ),
-            if (filterTag != null || allOnly) ...[
-              const SizedBox(height: 28),
-              Text(
-                allOnly ? 'All spots' : '#$filterTag',
-                style: const TextStyle(
-                  color: AppColors.textPrimary,
-                  fontSize: 20,
-                  fontWeight: FontWeight.w800,
-                  fontFamily: 'Inter',
-                ),
-              ),
-              const SizedBox(height: 12),
-              _SpotList(tag: filterTag),
+              if (filterTag != null || allOnly) ...[
+                const SizedBox(height: 26),
+                _SpotList(tag: filterTag, allOnly: allOnly),
+              ],
             ],
-          ],
+          ),
         ),
       ),
     );
@@ -92,112 +137,143 @@ class CategoriesScreen extends StatelessWidget {
 }
 
 class _CategoryCard extends StatelessWidget {
-  const _CategoryCard({required this.cat});
+  const _CategoryCard({required this.category, required this.onTap});
 
-  final (String, String, IconData, String, Color, String) cat;
+  final SpotCategory category;
+  final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
-    final (name, subtitle, icon, _, color, seed) = cat;
-    return PressButton(
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(18),
-        child: Stack(
-          fit: StackFit.expand,
-          children: [
-            Image.network(
-              'https://picsum.photos/seed/$seed/500/700',
-              fit: BoxFit.cover,
-              errorBuilder: (_, _, _) => Container(color: AppColors.surfaceElevated),
-            ),
-            const DecoratedBox(
-              decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  begin: Alignment.topCenter,
-                  end: Alignment.bottomCenter,
-                  colors: [Color(0x33000000), Color(0xE6000000)],
+    return Semantics(
+      button: true,
+      label: '${category.label} — ${category.subtitle}',
+      child: GestureDetector(
+        onTap: onTap,
+        child: Container(
+          clipBehavior: Clip.antiAlias,
+          decoration: BoxDecoration(
+            color: AppColors.surfaceElevated,
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: AppColors.hairline),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(
+                child: SizedBox(
+                  width: double.infinity,
+                  child: Image.network(
+                    'https://picsum.photos/seed/${category.seed}/500/500',
+                    fit: BoxFit.cover,
+                    errorBuilder: (_, _, _) =>
+                        Container(color: AppColors.surface),
+                  ),
                 ),
               ),
-            ),
-            Positioned(
-              top: 12,
-              left: 12,
-              child: Container(
-                padding: const EdgeInsets.all(8),
-                decoration: BoxDecoration(
-                  color: const Color(0xB3161618),
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: AppColors.hairline),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(12, 10, 10, 12),
+                child: Row(
+                  children: [
+                    Icon(category.icon, color: category.color, size: 17),
+                    const SizedBox(width: 7),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            category.label,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              color: AppColors.textPrimary,
+                              fontSize: 13.5,
+                              fontWeight: FontWeight.w700,
+                              fontFamily: 'Inter',
+                              letterSpacing: -0.2,
+                            ),
+                          ),
+                          const SizedBox(height: 2),
+                          Text(
+                            category.subtitle,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              color: AppColors.textSecondary,
+                              fontSize: 11,
+                              fontFamily: 'Inter',
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
                 ),
-                child: Icon(icon, color: color, size: 20),
               ),
-            ),
-            Positioned(
-              left: 14,
-              right: 14,
-              bottom: 14,
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    name,
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontSize: 17,
-                      fontWeight: FontWeight.w800,
-                      letterSpacing: -0.4,
-                      fontFamily: 'Inter',
-                    ),
-                  ),
-                  const SizedBox(height: 3),
-                  Text(
-                    subtitle,
-                    style: const TextStyle(
-                      color: Color(0xCCFFFFFF),
-                      fontSize: 12.5,
-                      fontFamily: 'Inter',
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
-      onTap: () {
-        Navigator.of(context).push(
-          MaterialPageRoute(
-            builder: (_) => CategoriesScreen(filterTag: cat.$4),
-          ),
-        );
-      },
     );
   }
 }
 
 class _SpotList extends StatelessWidget {
-  const _SpotList({this.tag});
+  const _SpotList({this.tag, required this.allOnly});
 
   final String? tag;
+  final bool allOnly;
+
+  List<Spot> _filter(AppState state) {
+    if (allOnly || tag == null) return state.rankedSpots;
+    return state.spots
+        .where((spot) =>
+            spot.tags.any((t) => t.toLowerCase() == tag!.toLowerCase()))
+        .toList();
+  }
 
   @override
   Widget build(BuildContext context) {
     final state = context.watch<AppState>();
-    final spots = tag == null
-        ? state.spots
-        : state.spots
-            .where((s) => s.tags.any((t) => t.toLowerCase() == tag!.toLowerCase()))
-            .toList();
+    final spots = _filter(state);
+
     return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        for (int i = 0; i < spots.length; i++) ...[
-          RevealItem(
-            index: i,
-            total: spots.length,
-            child: SavedRow(spot: spots[i]),
+        Text(
+          allOnly ? 'All spots' : '#${tag!}',
+          style: const TextStyle(
+            color: AppColors.textPrimary,
+            fontSize: 20,
+            fontWeight: FontWeight.w800,
+            fontFamily: 'Inter',
+            letterSpacing: -0.4,
           ),
-          const SizedBox(height: 10),
-        ],
+        ),
+        const SizedBox(height: 12),
+        if (spots.isEmpty)
+          const Padding(
+            padding: EdgeInsets.symmetric(vertical: 28),
+            child: EmptyState(
+              icon: Icons.photo_camera_outlined,
+              title: 'Nothing here yet',
+              message: 'No spots match this category yet. Add the first one.',
+            ),
+          )
+        else
+          for (var i = 0; i < spots.length; i++) ...[
+            RevealItem(
+              index: i,
+              total: spots.length,
+              child: SavedRow(
+                spot: spots[i],
+                heroTag: 'category-${tag ?? 'all'}-${spots[i].id}',
+                distanceKm: state.hasUserLocation
+                    ? state.distanceKm(state.referenceLocation, spots[i])
+                    : null,
+              ),
+            ),
+            const SizedBox(height: 10),
+          ],
       ],
     );
   }

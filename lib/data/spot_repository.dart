@@ -1,12 +1,32 @@
+import 'dart:typed_data';
+
 import 'package:latlong2/latlong.dart';
 
 import '../models/spot.dart';
 
+/// A failure with a message that is safe to show to the user.
+class AppException implements Exception {
+  const AppException(this.message);
+
+  final String message;
+
+  @override
+  String toString() => message;
+}
+
 /// Contract every data source implements: mock today, Supabase when keys exist.
 abstract class SpotRepository {
   Future<List<Spot>> fetchSpots();
-  Future<void> toggleSave(Spot spot, {required bool saved});
+
+  /// Saved spot IDs for the current user, or `null` when the source does not
+  /// own save state (the app then falls back to local persistence).
+  Future<Set<String>?> fetchSavedIds();
+
+  /// Returns false when the save could not be persisted (e.g. no session).
+  Future<bool> toggleSave(Spot spot, {required bool saved});
+
   Future<void> recordView(Spot spot);
+
   Future<Spot> submitSpot({
     required String title,
     required String description,
@@ -14,7 +34,7 @@ abstract class SpotRepository {
     required String city,
     required List<String> tags,
     String? bestTime,
-    String? photoUrl,
+    Uint8List? photoBytes,
   });
 }
 
@@ -22,17 +42,28 @@ abstract class SpotRepository {
 /// Supabase credentials are configured.
 class MockSpotRepository implements SpotRepository {
   final List<Spot> _spots = _seed();
+  final Set<String> _savedIds = {};
 
   @override
   Future<List<Spot>> fetchSpots() async => List.unmodifiable(_spots);
 
   @override
-  Future<void> toggleSave(Spot spot, {required bool saved}) async {
+  Future<Set<String>?> fetchSavedIds() async => null;
+
+  @override
+  Future<bool> toggleSave(Spot spot, {required bool saved}) async {
     final i = _spots.indexWhere((s) => s.id == spot.id);
-    if (i == -1) return;
-    final current = _spots[i];
-    final next = saved ? current.saveCount + 1 : current.saveCount - 1;
-    _spots[i] = current.copyWith(saveCount: next < 0 ? 0 : next);
+    if (i != -1) {
+      final current = _spots[i];
+      final next = saved ? current.saveCount + 1 : current.saveCount - 1;
+      _spots[i] = current.copyWith(saveCount: next < 0 ? 0 : next);
+    }
+    if (saved) {
+      _savedIds.add(spot.id);
+    } else {
+      _savedIds.remove(spot.id);
+    }
+    return true;
   }
 
   @override
@@ -50,10 +81,11 @@ class MockSpotRepository implements SpotRepository {
     required String city,
     required List<String> tags,
     String? bestTime,
-    String? photoUrl,
+    Uint8List? photoBytes,
   }) async {
+    final stamp = DateTime.now().millisecondsSinceEpoch;
     final spot = Spot(
-      id: 'user-${DateTime.now().millisecondsSinceEpoch}',
+      id: 'user-$stamp',
       title: title,
       description: description,
       location: location,
@@ -64,10 +96,14 @@ class MockSpotRepository implements SpotRepository {
       submittedBy: 'you',
       photos: [
         SpotPhoto(
-          id: 'p-${DateTime.now().millisecondsSinceEpoch}',
-          url: photoUrl ?? 'https://picsum.photos/seed/$title/800/600',
+          id: 'p-$stamp',
+          // Demo mode has no storage bucket, so keep the picked bytes on the
+          // photo and render them locally. Real uploads happen in
+          // SupabaseSpotRepository.
+          url: 'https://picsum.photos/seed/$title-$stamp/900/700',
           uploadedBy: 'you',
           takenAt: DateTime.now(),
+          bytes: photoBytes,
         ),
       ],
     );
@@ -141,7 +177,7 @@ List<Spot> _seed() {
       'Miradouro da Senhora do Monte',
       LatLng(38.7223, -9.1335),
       'Lisbon',
-      ['skyline', 'sunset'],
+      ['skyline', 'sunset', 'date'],
       'Golden hour',
       'Highest viewpoint in Alfama. The whole city falls away toward the river — arrive 45 min before sunset and set up against the stone wall.',
       214, 1890, 2,
@@ -152,7 +188,7 @@ List<Spot> _seed() {
       'Miradouro de Santa Luzia',
       LatLng(38.7121, -9.1305),
       'Lisbon',
-      ['tiles', 'street'],
+      ['tiles', 'street', 'friends', 'date'],
       'Morning light',
       'Blue-and-white azulejo wall framed by bougainvillea. Best in soft morning light before the tour groups arrive.',
       168, 1420, 6,
@@ -163,7 +199,7 @@ List<Spot> _seed() {
       'Praça do Comércio',
       LatLng(38.7077, -9.1365),
       'Lisbon',
-      ['architecture', 'symmetry'],
+      ['architecture', 'symmetry', 'date', 'friends'],
       'Blue hour',
       'Symmetrical arch and riverside square. Stand under Rua Augusta Arch to frame the whole plaza.',
       192, 1675, 4,
@@ -174,7 +210,7 @@ List<Spot> _seed() {
       'Belém Tower',
       LatLng(38.6916, -9.2160),
       'Lisbon',
-      ['landmark', 'water'],
+      ['landmark', 'water', 'date'],
       'Sunset',
       'Shoot from the far side of the water for the full silhouette. Low tide exposes reflective sand.',
       143, 1210, 11,
@@ -185,7 +221,7 @@ List<Spot> _seed() {
       'LX Factory',
       LatLng(38.7033, -9.1786),
       'Lisbon',
-      ['street', 'industrial'],
+      ['street', 'industrial', 'friends'],
       'Afternoon',
       'Industrial chic under the 25 de Abril bridge — murals, neon signs, and gritty textures.',
       97, 860, 9,
@@ -196,7 +232,7 @@ List<Spot> _seed() {
       'Tram 28 at Graça',
       LatLng(38.7169, -9.1332),
       'Lisbon',
-      ['street', 'tram'],
+      ['street', 'tram', 'friends'],
       'Golden hour',
       'The classic yellow tram shot. Stand on the pavement bend and wait for the tram to crest the hill.',
       176, 1530, 1,
@@ -207,7 +243,7 @@ List<Spot> _seed() {
       'Castelo de São Jorge',
       LatLng(38.7139, -9.1335),
       'Lisbon',
-      ['skyline', 'landmark'],
+      ['skyline', 'landmark', 'date'],
       'Sunset',
       'Ramparts look straight down over the red rooftops. Golden hour hits the castle walls first.',
       131, 1105, 15,
@@ -229,7 +265,7 @@ List<Spot> _seed() {
       'Pink Street',
       LatLng(38.7075, -9.1458),
       'Lisbon',
-      ['street', 'nightlife'],
+      ['street', 'nightlife', 'friends'],
       'Night',
       'Pink cobbles and yellow umbrellas. Empty and clean at dawn, buzzing with neon after dark.',
       120, 1015, 3,
@@ -251,7 +287,7 @@ List<Spot> _seed() {
       'Cais das Colunas',
       LatLng(38.7066, -9.1440),
       'Lisbon',
-      ['water', 'reflection'],
+      ['water', 'reflection', 'date'],
       'Blue hour',
       'Two marble columns walking into the Tagus. Reflections pool around your feet at high tide.',
       102, 895, 7,
@@ -262,7 +298,7 @@ List<Spot> _seed() {
       'Graça Rooftop Ledge',
       LatLng(38.7185, -9.1347),
       'Lisbon',
-      ['skyline', 'hidden gem'],
+      ['skyline', 'hidden gem', 'date'],
       'Golden hour',
       'A quiet residential ledge most tourists walk past. Full river view with no one behind you.',
       58, 430, 0,

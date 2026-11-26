@@ -1,38 +1,36 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 /// Animation system for PhotoSpot — purposeful motion that explains state,
-/// relationship, and hierarchy. No generic fade-and-rise decoration.
+/// relationship, and hierarchy.
 class AppMotion {
   AppMotion._();
 
-  // Durations per the animate.md timing table.
-  static const Duration instant = Duration(milliseconds: 120); // immediate feedback
-  static const Duration quick = Duration(milliseconds: 220); // routine state change
-  static const Duration layout = Duration(milliseconds: 340); // layout/overlay transition
-  static const Duration focus = Duration(milliseconds: 520); // authored focal entrance
+  static const Duration instant = Duration(milliseconds: 120);
+  static const Duration quick = Duration(milliseconds: 220);
+  static const Duration layout = Duration(milliseconds: 340);
 
-  // Easing — confident arrivals, exit faster than entrance.
   static const Curve easeOut = Curves.easeOutCubic;
-  static const Curve easeInOut = Curves.easeInOutCubic;
-  static const Curve snap = Curves.elasticInOut; // reserved for deliberate moments only
 
-  /// Page route: slide up from bottom with fade — used for new screens.
-  static PageRouteBuilder slideUp(Widget page) {
-    return PageRouteBuilder(
-      pageBuilder: (_, animation, __) => FadeTransition(
-        opacity: animation,
-        child: page,
-      ),
-      transitionsBuilder: (_, animation, __, child) {
-        return SlideTransition(
-          position: Tween<Offset>(
-            begin: const Offset(0, 0.18),
-            end: Offset.zero,
-          ).chain(CurveTween(curve: easeOut)).animate(animation),
-          child: FadeTransition(
-            opacity: Tween<double>(begin: 0, end: 1)
-                .chain(CurveTween(curve: easeOut))
-                .animate(animation),
+  /// Page route: slide up slightly with a fade. Used for every pushed screen.
+  static PageRouteBuilder<T> slideUp<T>(Widget page) {
+    return PageRouteBuilder<T>(
+      pageBuilder: (_, _, _) => page,
+      transitionsBuilder: (_, animation, _, child) {
+        final curved = CurvedAnimation(
+          parent: animation,
+          curve: easeOut,
+          reverseCurve: Curves.easeInCubic,
+        );
+        return FadeTransition(
+          opacity: curved,
+          child: SlideTransition(
+            position: Tween<Offset>(
+              begin: const Offset(0, 0.06),
+              end: Offset.zero,
+            ).animate(curved),
             child: child,
           ),
         );
@@ -42,11 +40,11 @@ class AppMotion {
     );
   }
 
-  /// Modal route: slide up from bottom for sheets/modals.
-  static PageRouteBuilder slideUpModal(Widget page) {
-    return PageRouteBuilder(
-      pageBuilder: (_, animation, __) => page,
-      transitionsBuilder: (_, animation, __, child) {
+  /// Bottom-sheet style route for task flows (submit).
+  static PageRouteBuilder<T> slideUpModal<T>(Widget page) {
+    return PageRouteBuilder<T>(
+      pageBuilder: (_, _, _) => page,
+      transitionsBuilder: (_, animation, _, child) {
         return SlideTransition(
           position: Tween<Offset>(
             begin: const Offset(0, 1),
@@ -60,95 +58,13 @@ class AppMotion {
     );
   }
 
-  /// Fade route for detail pages with hero images.
-  static PageRouteBuilder fadeWithHero(Widget page) {
-    return PageRouteBuilder(
-      pageBuilder: (_, animation, __) => FadeTransition(
-        opacity: Tween<double>(begin: 0.0, end: 1.0).animate(animation),
-        child: page,
-      ),
-      transitionDuration: quick,
-      reverseTransitionDuration: quick,
-    );
-  }
-
-  /// Stagger delay for list items — cap total delay so lists don't feel slow.
+  /// Stagger delay for list items, capped so long lists never feel slow.
   static Duration staggerDelay(int index, {int itemCount = 8}) {
-    // Cap at 220ms total so a full list reveals in under 300ms.
-    final step = 60;
-    return Duration(milliseconds: (index * step).clamp(0, 220));
-  }
-
-  /// Entrance animation for list items — slide up + fade.
-  static Widget listItem({
-    required int index,
-    required Widget child,
-    required Duration delay,
-  }) {
-    return AnimatedBuilder(
-      animation: const AlwaysStoppedAnimation(1.0),
-      builder: (context, _) {
-        return Transform.translate(
-          offset: Offset(0, 0),
-          child: Opacity(
-            opacity: 1.0,
-            child: child,
-          ),
-        );
-      },
-    );
-  }
-
-  /// Reveals a widget after a delay with slide-up + fade.
-  static Widget reveal({
-    required Widget child,
-    required int index,
-    required int total,
-  }) {
-    return FutureBuilder(
-      future: Future.delayed(staggerDelay(index, itemCount: total)),
-      builder: (context, snapshot) {
-        if (snapshot.connectionState == ConnectionState.waiting) {
-          return const SizedBox.shrink();
-        }
-        return SlideTransition(
-          position: Tween<Offset>(
-            begin: const Offset(0, 0.12),
-            end: Offset.zero,
-          ).chain(CurveTween(curve: easeOut)).animate(
-            AlwaysStoppedAnimation(1.0),
-          ),
-          child: FadeTransition(
-            opacity: Tween<double>(begin: 0, end: 1)
-                .chain(CurveTween(curve: easeOut))
-                .animate(AlwaysStoppedAnimation(1.0)),
-            child: child,
-          ),
-        );
-      },
-    );
-  }
-
-  /// Press feedback — scale down slightly on tap.
-  static Widget pressFeedback({
-    required Widget child,
-    required VoidCallback onTap,
-  }) {
-    return GestureDetector(
-      onTapDown: (_) {},
-      onTapUp: (_) {},
-      onTap: onTap,
-      child: AnimatedScale(
-        scale: 1.0,
-        duration: instant,
-        curve: easeOut,
-        child: child,
-      ),
-    );
+    return Duration(milliseconds: (index * 45).clamp(0, 240));
   }
 }
 
-/// Reusable animated list item that reveals with a staggered delay.
+/// Reveals a widget with a staggered slide-up + fade on first build.
 class RevealItem extends StatefulWidget {
   const RevealItem({
     super.key,
@@ -170,6 +86,7 @@ class _RevealItemState extends State<RevealItem>
   late final AnimationController _controller;
   late final Animation<double> _slide;
   late final Animation<double> _fade;
+  Timer? _delayTimer;
 
   @override
   void initState() {
@@ -178,29 +95,37 @@ class _RevealItemState extends State<RevealItem>
       vsync: this,
       duration: AppMotion.layout,
     );
-    _slide = Tween<double>(begin: 0.12, end: 0.0).chain(
-      CurveTween(curve: AppMotion.easeOut),
-    ).animate(_controller);
-    _fade = Tween<double>(begin: 0.0, end: 1.0).chain(
-      CurveTween(curve: AppMotion.easeOut),
-    ).animate(_controller);
+    _slide = Tween<double>(begin: 0.06, end: 0.0)
+        .chain(CurveTween(curve: AppMotion.easeOut))
+        .animate(_controller);
+    _fade = Tween<double>(begin: 0.0, end: 1.0)
+        .chain(CurveTween(curve: AppMotion.easeOut))
+        .animate(_controller);
 
-    _controller.forward();
+    _delayTimer = Timer(
+      AppMotion.staggerDelay(widget.index, itemCount: widget.total),
+      () {
+        if (mounted) _controller.forward();
+      },
+    );
   }
 
   @override
   void dispose() {
+    _delayTimer?.cancel();
     _controller.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
+    if (MediaQuery.disableAnimationsOf(context)) return widget.child;
+
     return AnimatedBuilder(
       animation: _controller,
       builder: (context, child) {
         return Transform.translate(
-          offset: Offset(0, _slide.value * 20),
+          offset: Offset(0, _slide.value * 24),
           child: Opacity(opacity: _fade.value, child: child),
         );
       },
@@ -209,16 +134,20 @@ class _RevealItemState extends State<RevealItem>
   }
 }
 
-/// Scaled press button — visual feedback on tap.
+/// A tappable surface with scale feedback, haptics, and semantics.
 class PressButton extends StatefulWidget {
   const PressButton({
     super.key,
     required this.child,
     required this.onTap,
+    this.semanticLabel,
+    this.enabled = true,
   });
 
   final Widget child;
   final VoidCallback onTap;
+  final String? semanticLabel;
+  final bool enabled;
 
   @override
   State<PressButton> createState() => _PressButtonState();
@@ -236,9 +165,9 @@ class _PressButtonState extends State<PressButton>
       vsync: this,
       duration: AppMotion.instant,
     );
-    _scale = Tween<double>(begin: 1.0, end: 0.95).chain(
-      CurveTween(curve: AppMotion.easeOut),
-    ).animate(_controller);
+    _scale = Tween<double>(begin: 1.0, end: 0.96)
+        .chain(CurveTween(curve: AppMotion.easeOut))
+        .animate(_controller);
   }
 
   @override
@@ -248,24 +177,33 @@ class _PressButtonState extends State<PressButton>
   }
 
   void _onTapDown(TapDownDetails details) {
-    _controller.forward();
+    if (widget.enabled) _controller.forward();
   }
 
   void _onTapUp(TapUpDetails details) {
     _controller.reverse();
+    if (!widget.enabled) return;
+    HapticFeedback.selectionClick();
     widget.onTap();
   }
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
-      onTapDown: _onTapDown,
-      onTapUp: _onTapUp,
-      onTapCancel: () => _controller.reverse(),
-      child: AnimatedBuilder(
-        animation: _scale,
-        builder: (context, child) => Transform.scale(scale: _scale.value, child: child),
-        child: widget.child,
+    return Semantics(
+      button: true,
+      enabled: widget.enabled,
+      label: widget.semanticLabel,
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTapDown: _onTapDown,
+        onTapUp: _onTapUp,
+        onTapCancel: () => _controller.reverse(),
+        child: AnimatedBuilder(
+          animation: _scale,
+          builder: (context, child) =>
+              Transform.scale(scale: _scale.value, child: child),
+          child: widget.child,
+        ),
       ),
     );
   }

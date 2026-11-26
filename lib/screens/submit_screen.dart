@@ -1,17 +1,19 @@
-import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:provider/provider.dart';
+import 'package:url_launcher/url_launcher.dart';
 
-import '../data/supabase_repository.dart';
+import '../data/spot_repository.dart';
 import '../state/app_state.dart';
 import '../theme/app_animations.dart';
 import '../theme/app_theme.dart';
+import '../utils/format.dart';
 
-/// Submit flow — step-by-step upload page styled like the reference.
+/// Four-step submit flow: photo, details, pin, review.
 class SubmitScreen extends StatefulWidget {
   const SubmitScreen({super.key});
 
@@ -20,43 +22,44 @@ class SubmitScreen extends StatefulWidget {
 }
 
 class _SubmitScreenState extends State<SubmitScreen> {
-  int _step = 0; // 0: photo, 1: details, 2: location, 3: review/publish
+  int _step = 0;
 
   final _titleController = TextEditingController();
   final _descController = TextEditingController();
   final _cityController = TextEditingController(text: 'Lisbon');
 
   String? _bestTime;
-  Set<String> _tags = {};
-  LatLng _pinned = const LatLng(38.7128, -9.1393);
+  final Set<String> _tags = {};
+  LatLng _pinned = AppState.fallbackCenter;
+  Uint8List? _photoBytes;
   bool _submitting = false;
-  XFile? _photoFile;
-
-  static const _tagOptions = [
-    'skyline',
-    'sunset',
-    'street',
-    'architecture',
-    'water',
-    'nightlife',
-    'hidden gem',
-    'reflection',
-    'tiles',
-    'landmark',
-  ];
-  static const _bestTimeOptions = [
-    'Golden hour',
-    'Blue hour',
-    'Morning light',
-    'Night',
-    'Afternoon',
-  ];
 
   static const _stepTitles = [
     'Add a photo',
     'Tell us about it',
     'Drop the pin',
     'Review',
+  ];
+
+  static const _tagOptions = [
+    'skyline',
+    'sunset',
+    'date',
+    'friends',
+    'street',
+    'architecture',
+    'water',
+    'nightlife',
+    'hidden gem',
+    'reflection',
+  ];
+
+  static const _bestTimeOptions = [
+    'Golden hour',
+    'Blue hour',
+    'Morning light',
+    'Night',
+    'Afternoon',
   ];
 
   @override
@@ -67,31 +70,41 @@ class _SubmitScreenState extends State<SubmitScreen> {
     super.dispose();
   }
 
-  Future<void> _pickPhoto() async {
-    final picker = ImagePicker();
-    final picked = await picker.pickImage(
-      source: ImageSource.gallery,
-      maxWidth: 1600,
-      imageQuality: 85,
-    );
-    if (picked != null && mounted) {
-      setState(() => _photoFile = picked);
-    }
-  }
-
   bool get _canProceed {
     switch (_step) {
       case 0:
-        return _photoFile != null;
+        return _photoBytes != null;
       case 1:
         return _titleController.text.trim().isNotEmpty &&
-            _descController.text.trim().length >= 10;
-      case 2:
-        return true;
-      case 3:
-        return true;
+            _descController.text.trim().length >= 10 &&
+            _cityController.text.trim().isNotEmpty;
       default:
-        return false;
+        return true;
+    }
+  }
+
+  Future<void> _pickPhoto(ImageSource source) async {
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      final picked = await ImagePicker().pickImage(
+        source: source,
+        maxWidth: 1600,
+        imageQuality: 85,
+      );
+      if (picked == null) return;
+      final bytes = await picked.readAsBytes();
+      if (!mounted) return;
+      setState(() => _photoBytes = bytes);
+    } catch (_) {
+      messenger.showSnackBar(
+        SnackBar(
+          content: Text(
+            source == ImageSource.camera
+                ? 'Could not open the camera.'
+                : 'Could not open the photo picker.',
+          ),
+        ),
+      );
     }
   }
 
@@ -100,207 +113,108 @@ class _SubmitScreenState extends State<SubmitScreen> {
       await _publish();
       return;
     }
-    if (!_canProceed) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Please complete this step first')),
-      );
-      return;
-    }
+    if (!_canProceed) return;
     setState(() => _step++);
   }
 
-  Future<void> _back() async {
-    if (_step > 0 && mounted) {
-      setState(() => _step--);
-    }
-  }
-
   Future<void> _publish() async {
+    if (_submitting) return;
+    if (!_canProceed) {
+      setState(() => _step = 0);
+      return;
+    }
+
+    final messenger = ScaffoldMessenger.of(context);
+    final navigator = Navigator.of(context);
     setState(() => _submitting = true);
+
     try {
-      final state = context.read<AppState>();
-      await state.submitSpot(
-        title: _titleController.text.trim(),
-        description: _descController.text.trim(),
-        location: _pinned,
-        city: _cityController.text.trim(),
-        tags: _tags.toList(),
-        bestTime: _bestTime,
-      );
+      await context.read<AppState>().submitSpot(
+            title: _titleController.text.trim(),
+            description: _descController.text.trim(),
+            location: _pinned,
+            city: _cityController.text.trim(),
+            tags: _tags.toList(),
+            bestTime: _bestTime,
+            photoBytes: _photoBytes,
+          );
       if (!mounted) return;
-      Navigator.of(context).pop();
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Spot added to the map 📍')),
+      navigator.pop();
+      messenger.showSnackBar(
+        const SnackBar(content: Text('Spot added to the map')),
       );
-    } catch (e) {
+    } catch (error) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Failed to submit: $e')),
+      messenger.showSnackBar(
+        SnackBar(
+          content: Text(
+            error is AppException
+                ? error.message
+                : 'Could not publish this spot. Please try again.',
+          ),
+        ),
       );
     } finally {
       if (mounted) setState(() => _submitting = false);
     }
   }
 
+  void _back() {
+    if (_step > 0) {
+      setState(() => _step--);
+    } else {
+      Navigator.of(context).maybePop();
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: AppColors.background,
-      appBar: AppBar(
-        backgroundColor: Colors.transparent,
-        surfaceTintColor: Colors.transparent,
-        elevation: 0,
-        leading: PressButton(
-          child: Container(
-            width: 40,
-            height: 40,
-            decoration: BoxDecoration(
-              color: const Color(0x1AFFFFFF),
-              shape: BoxShape.circle,
-              border: Border.all(color: AppColors.hairline),
-            ),
-            child: const Icon(Icons.arrow_back_rounded,
-                color: AppColors.textPrimary, size: 22),
-          ),
-          onTap: () => Navigator.of(context).pop(),
-        ),
-        title: Text(
-          _stepTitles[_step],
-          style: const TextStyle(
-            color: AppColors.textPrimary,
-            fontSize: 20,
-            fontWeight: FontWeight.w800,
-            letterSpacing: -0.5,
-            fontFamily: 'Inter',
-          ),
-        ),
-        centerTitle: true,
-      ),
-      body: SafeArea(
-        child: Column(
-          children: [
-            // Progress bar.
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-              child: Column(
-                children: [
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      for (int i = 0; i < 4; i++) ...[
-                        Expanded(
-                          child: Container(
-                            height: 4,
-                            margin: const EdgeInsets.symmetric(horizontal: 4),
-                            decoration: BoxDecoration(
-                              color: i <= _step
-                                  ? AppColors.action
-                                  : const Color(0x1AFFFFFF),
-                              borderRadius: BorderRadius.circular(2),
-                            ),
-                          ),
-                        ),
-                      ],
-                    ],
-                  ),
-                  const SizedBox(height: 12),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      for (int i = 0; i < 4; i++) ...[
-                        Expanded(
-                          child: Text(
-                            _stepTitles[i],
-                            textAlign: TextAlign.center,
-                            style: TextStyle(
-                              color: i <= _step
-                                  ? AppColors.textPrimary
-                                  : AppColors.textFaint,
-                              fontSize: 11,
-                              fontWeight: i <= _step
-                                  ? FontWeight.w800
-                                  : FontWeight.w600,
-                              fontFamily: 'Inter',
-                            ),
-                          ),
-                        ),
-                      ],
-                    ],
-                  ),
-                ],
-              ),
-            ),
-
-            Expanded(
-              child: _stepContent(),
-            ),
-
-            // Bottom nav.
-            Container(
-              padding: const EdgeInsets.fromLTRB(20, 16, 20, 30),
+    return PopScope(
+      canPop: _step == 0,
+      onPopInvokedWithResult: (didPop, _) {
+        if (!didPop) setState(() => _step--);
+      },
+      child: Scaffold(
+        backgroundColor: AppColors.background,
+        appBar: AppBar(
+          leading: PressButton(
+            semanticLabel: _step == 0 ? 'Close' : 'Back',
+            onTap: _back,
+            child: Container(
+              width: 40,
+              height: 40,
+              margin: const EdgeInsets.only(left: 8),
               decoration: BoxDecoration(
-                color: AppColors.background,
-                border: Border(
-                  top: BorderSide(color: AppColors.hairline),
-                ),
+                color: const Color(0x14FFFFFF),
+                shape: BoxShape.circle,
+                border: Border.all(color: AppColors.hairline),
               ),
-              child: SafeArea(
-                top: false,
-                child: Row(
-                  children: [
-                    if (_step > 0)
-                      Expanded(
-                        child: SizedBox(
-                          height: 52,
-                          child: OutlinedButton(
-                            onPressed: _back,
-                            style: OutlinedButton.styleFrom(
-                              foregroundColor: AppColors.textPrimary,
-                              side: const BorderSide(color: AppColors.hairline),
-                              shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(14)),
-                            ),
-                            child: const Text('Back',
-                                style: TextStyle(
-                                    fontSize: 15,
-                                    fontWeight: FontWeight.w700,
-                                    fontFamily: 'Inter')),
-                          ),
-                        ),
-                      ),
-                    if (_step > 0) const SizedBox(width: 12),
-                    Expanded(
-                      flex: _step > 0 ? 2 : 1,
-                      child: SizedBox(
-                        height: 52,
-                        child: PressButton(
-                          child: Container(
-                            decoration: BoxDecoration(
-                              color: _canProceed
-                                  ? AppColors.action
-                                  : const Color(0x1AFFFFFF),
-                              borderRadius: BorderRadius.circular(14),
-                            ),
-                            alignment: Alignment.center,
-                            child: Text(
-                              _step == 3 ? 'Publish' : 'Next',
-                              style: const TextStyle(
-                                color: AppColors.onAction,
-                                fontSize: 15,
-                                fontWeight: FontWeight.w800,
-                                fontFamily: 'Inter',
-                              ),
-                            ),
-                          ),
-                          onTap: _next,
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
+              child: Icon(
+                _step == 0 ? Icons.close_rounded : Icons.arrow_back_rounded,
+                color: AppColors.textPrimary,
+                size: 20,
               ),
             ),
-          ],
+          ),
+          title: Text(_stepTitles[_step]),
+          centerTitle: true,
+        ),
+        body: SafeArea(
+          child: ResponsiveBody(
+            child: Column(
+              children: [
+                _ProgressBar(step: _step, titles: _stepTitles),
+                Expanded(child: _stepContent()),
+                _BottomBar(
+                  step: _step,
+                  enabled: _canProceed && !_submitting,
+                  submitting: _submitting,
+                  onBack: _back,
+                  onNext: _next,
+                ),
+              ],
+            ),
+          ),
         ),
       ),
     );
@@ -309,7 +223,11 @@ class _SubmitScreenState extends State<SubmitScreen> {
   Widget _stepContent() {
     switch (_step) {
       case 0:
-        return _PhotoStep();
+        return _PhotoStep(
+          photoBytes: _photoBytes,
+          onPick: _pickPhoto,
+          onClear: () => setState(() => _photoBytes = null),
+        );
       case 1:
         return _DetailsStep(
           titleController: _titleController,
@@ -317,46 +235,209 @@ class _SubmitScreenState extends State<SubmitScreen> {
           cityController: _cityController,
           bestTime: _bestTime,
           tags: _tags,
-          onBestTimeChanged: (v) => setState(() => _bestTime = v),
-          onTagsChanged: (t) => setState(() => _tags = t),
+          bestTimeOptions: _bestTimeOptions,
+          tagOptions: _tagOptions,
+          onChanged: () => setState(() {}),
+          onBestTimeChanged: (value) => setState(() => _bestTime = value),
+          onTagsChanged: (value) => setState(() {
+            _tags
+              ..clear()
+              ..addAll(value);
+          }),
         );
       case 2:
         return _LocationStep(
           pinned: _pinned,
-          onPinMoved: (p) => setState(() => _pinned = p),
+          onPinMoved: (value) => setState(() => _pinned = value),
         );
-      case 3:
+      default:
         return _ReviewStep(
+          photoBytes: _photoBytes,
           title: _titleController.text.trim(),
           description: _descController.text.trim(),
           city: _cityController.text.trim(),
           bestTime: _bestTime,
-          tags: _tags,
-          photoFile: _photoFile,
+          tags: _tags.toList(),
+          latitude: _pinned.latitude,
+          longitude: _pinned.longitude,
         );
-      default:
-        return const SizedBox.shrink();
     }
   }
 }
 
-// ================= STEP 0: PHOTO =================
+class _ProgressBar extends StatelessWidget {
+  const _ProgressBar({required this.step, required this.titles});
 
-class _PhotoStep extends StatefulWidget {
-  @override
-  State<_PhotoStep> createState() => _PhotoStepState();
-}
-
-class _PhotoStepState extends State<_PhotoStep> {
-  XFile? _photoFile;
+  final int step;
+  final List<String> titles;
 
   @override
   Widget build(BuildContext context) {
-    return Column(
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+      child: Column(
+        children: [
+          Row(
+            children: [
+              for (var i = 0; i < titles.length; i++)
+                Expanded(
+                  child: Container(
+                    height: 3,
+                    margin: const EdgeInsets.symmetric(horizontal: 3),
+                    decoration: BoxDecoration(
+                      color: i <= step
+                          ? AppColors.action
+                          : const Color(0x1AFFFFFF),
+                      borderRadius: BorderRadius.circular(2),
+                    ),
+                  ),
+                ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          Row(
+            children: [
+              for (var i = 0; i < titles.length; i++)
+                Expanded(
+                  child: Text(
+                    titles[i],
+                    textAlign: TextAlign.center,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      color:
+                          i <= step ? AppColors.textPrimary : AppColors.textFaint,
+                      fontSize: 10.5,
+                      fontWeight:
+                          i <= step ? FontWeight.w700 : FontWeight.w500,
+                      fontFamily: 'Inter',
+                    ),
+                  ),
+                ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _BottomBar extends StatelessWidget {
+  const _BottomBar({
+    required this.step,
+    required this.enabled,
+    required this.submitting,
+    required this.onBack,
+    required this.onNext,
+  });
+
+  final int step;
+  final bool enabled;
+  final bool submitting;
+  final VoidCallback onBack;
+  final VoidCallback onNext;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.fromLTRB(20, 12, 20, 10),
+      decoration: BoxDecoration(
+        color: AppColors.background,
+        border: Border(top: BorderSide(color: AppColors.hairline)),
+      ),
+      child: SafeArea(
+        top: false,
+        child: Row(
+          children: [
+            if (step > 0) ...[
+              Expanded(
+                child: SizedBox(
+                  height: 52,
+                  child: OutlinedButton(
+                    onPressed: submitting ? null : onBack,
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: AppColors.textPrimary,
+                      side: const BorderSide(color: AppColors.hairline),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(14),
+                      ),
+                    ),
+                    child: const Text(
+                      'Back',
+                      style: TextStyle(
+                        fontSize: 14.5,
+                        fontWeight: FontWeight.w700,
+                        fontFamily: 'Inter',
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 10),
+            ],
+            Expanded(
+              flex: step > 0 ? 2 : 1,
+              child: PressButton(
+                semanticLabel: step == 3 ? 'Publish spot' : 'Next step',
+                enabled: enabled,
+                onTap: onNext,
+                child: Container(
+                  height: 52,
+                  decoration: BoxDecoration(
+                    color: enabled
+                        ? AppColors.action
+                        : const Color(0x1AFFFFFF),
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+                  alignment: Alignment.center,
+                  child: submitting
+                      ? const SizedBox(
+                          width: 20,
+                          height: 20,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            color: AppColors.onAction,
+                          ),
+                        )
+                      : Text(
+                          step == 3 ? 'Publish' : 'Next',
+                          style: TextStyle(
+                            color: enabled
+                                ? AppColors.onAction
+                                : AppColors.textFaint,
+                            fontSize: 14.5,
+                            fontWeight: FontWeight.w800,
+                            fontFamily: 'Inter',
+                          ),
+                        ),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _PhotoStep extends StatelessWidget {
+  const _PhotoStep({
+    required this.photoBytes,
+    required this.onPick,
+    required this.onClear,
+  });
+
+  final Uint8List? photoBytes;
+  final ValueChanged<ImageSource> onPick;
+  final VoidCallback onClear;
+
+  @override
+  Widget build(BuildContext context) {
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(20, 16, 20, 20),
       children: [
-        const SizedBox(height: 24),
         const Text(
-          'Add a photo',
+          'Show the spot at its best',
           style: TextStyle(
             color: AppColors.textPrimary,
             fontSize: 17,
@@ -364,77 +445,118 @@ class _PhotoStepState extends State<_PhotoStep> {
             fontFamily: 'Inter',
           ),
         ),
-        const SizedBox(height: 6),
+        const SizedBox(height: 5),
         const Text(
-          'Pick your best shot of the spot',
+          'One photo is required. Pick your best shot — it becomes the cover.',
           style: TextStyle(
             color: AppColors.textSecondary,
-            fontSize: 14,
+            fontSize: 13,
+            height: 1.45,
             fontFamily: 'Inter',
           ),
         ),
-        const SizedBox(height: 24),
+        const SizedBox(height: 18),
         GestureDetector(
-          onTap: () async {
-            final picker = ImagePicker();
-            final picked = await picker.pickImage(
-              source: ImageSource.gallery,
-              maxWidth: 1600,
-              imageQuality: 85,
-            );
-            if (picked != null && mounted) {
-              setState(() => _photoFile = picked);
-            }
-          },
+          onTap: () => onPick(ImageSource.gallery),
           child: Container(
-            width: double.infinity,
-            height: 260,
+            height: 300,
+            clipBehavior: Clip.antiAlias,
             decoration: BoxDecoration(
               color: AppColors.surfaceElevated,
               borderRadius: BorderRadius.circular(20),
-              border: Border.all(color: AppColors.hairline),
+              border: Border.all(
+                color: photoBytes != null
+                    ? AppColors.accentSoft
+                    : AppColors.hairline,
+              ),
             ),
-            child: _photoFile == null
+            child: photoBytes == null
                 ? Column(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
                       const Icon(Icons.add_a_photo_rounded,
-                          color: AppColors.textSecondary, size: 48),
+                          color: AppColors.textSecondary, size: 42),
                       const SizedBox(height: 12),
                       const Text(
-                        'Add a photo of the spot',
+                        'Add your best shot',
                         style: TextStyle(
-                          color: AppColors.textSecondary,
-                          fontSize: 15,
-                          fontWeight: FontWeight.w600,
+                          color: AppColors.textPrimary,
+                          fontSize: 14.5,
+                          fontWeight: FontWeight.w700,
                           fontFamily: 'Inter',
                         ),
+                      ),
+                      const SizedBox(height: 4),
+                      const Text(
+                        'JPG or PNG · one photo required',
+                        style: TextStyle(
+                          color: AppColors.textFaint,
+                          fontSize: 12,
+                          fontFamily: 'Inter',
+                        ),
+                      ),
+                      const SizedBox(height: 20),
+                      Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          _PhotoSourceButton(
+                            icon: Icons.photo_library_rounded,
+                            label: 'Gallery',
+                            filled: true,
+                            onTap: () => onPick(ImageSource.gallery),
+                          ),
+                          const SizedBox(width: 10),
+                          _PhotoSourceButton(
+                            icon: Icons.photo_camera_rounded,
+                            label: 'Camera',
+                            onTap: () => onPick(ImageSource.camera),
+                          ),
+                        ],
                       ),
                     ],
                   )
                 : Stack(
                     fit: StackFit.expand,
                     children: [
-                      ClipRRect(
-                        borderRadius: BorderRadius.circular(20),
-                        child: Image.file(
-                          File(_photoFile!.path),
-                          fit: BoxFit.cover,
+                      Image.memory(photoBytes!, fit: BoxFit.cover),
+                      Positioned(
+                        top: 10,
+                        right: 10,
+                        child: Semantics(
+                          button: true,
+                          label: 'Remove photo',
+                          child: IconButton(
+                            onPressed: onClear,
+                            tooltip: 'Remove photo',
+                            icon: Container(
+                              padding: const EdgeInsets.all(7),
+                              decoration: const BoxDecoration(
+                                color: Colors.black54,
+                                shape: BoxShape.circle,
+                              ),
+                              child: const Icon(Icons.close_rounded,
+                                  color: Colors.white, size: 19),
+                            ),
+                          ),
                         ),
                       ),
                       Positioned(
-                        top: 12,
-                        right: 12,
-                        child: GestureDetector(
-                          onTap: () => setState(() => _photoFile = null),
-                          child: Container(
-                            padding: const EdgeInsets.all(7),
-                            decoration: const BoxDecoration(
-                              color: Colors.black54,
-                              shape: BoxShape.circle,
+                        bottom: 12,
+                        left: 12,
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 10, vertical: 5),
+                          decoration: BoxDecoration(
+                            color: Colors.black54,
+                            borderRadius: BorderRadius.circular(999),
+                          ),
+                          child: const Text(
+                            'Tap to change',
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontSize: 11,
+                              fontFamily: 'Inter',
                             ),
-                            child: const Icon(Icons.close,
-                                color: Colors.white, size: 20),
                           ),
                         ),
                       ),
@@ -442,159 +564,198 @@ class _PhotoStepState extends State<_PhotoStep> {
                   ),
           ),
         ),
-        const SizedBox(height: 16),
-        if (_photoFile == null)
-          Text(
-            'A photo is required to continue',
-            style: const TextStyle(
-              color: AppColors.danger,
-              fontSize: 12.5,
-              fontWeight: FontWeight.w600,
-              fontFamily: 'Inter',
-            ),
+        const SizedBox(height: 12),
+        Text(
+          photoBytes == null
+              ? 'A photo is required to continue'
+              : 'Looking good — continue when ready.',
+          style: TextStyle(
+            color: photoBytes == null
+                ? AppColors.textFaint
+                : AppColors.success,
+            fontSize: 12.5,
+            fontWeight: FontWeight.w600,
+            fontFamily: 'Inter',
           ),
+        ),
       ],
     );
   }
 }
 
-// ================= STEP 1: DETAILS =================
+/// Small pill used on the photo step to pick gallery or camera.
+class _PhotoSourceButton extends StatelessWidget {
+  const _PhotoSourceButton({
+    required this.icon,
+    required this.label,
+    required this.onTap,
+    this.filled = false,
+  });
+
+  final IconData icon;
+  final String label;
+  final VoidCallback onTap;
+  final bool filled;
+
+  @override
+  Widget build(BuildContext context) {
+    return PressButton(
+      semanticLabel: label == 'Camera'
+          ? 'Take a photo with the camera'
+          : 'Choose a photo from the gallery',
+      onTap: onTap,
+      child: Container(
+        height: 44,
+        padding: const EdgeInsets.symmetric(horizontal: 16),
+        decoration: BoxDecoration(
+          color: filled ? AppColors.action : const Color(0x14FFFFFF),
+          borderRadius: BorderRadius.circular(999),
+          border: Border.all(
+            color: filled ? AppColors.action : AppColors.hairline,
+          ),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              icon,
+              size: 17,
+              color: filled ? AppColors.onAction : AppColors.textPrimary,
+            ),
+            const SizedBox(width: 7),
+            Text(
+              label,
+              style: TextStyle(
+                color: filled ? AppColors.onAction : AppColors.textPrimary,
+                fontSize: 13,
+                fontWeight: FontWeight.w700,
+                fontFamily: 'Inter',
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
 
 class _DetailsStep extends StatefulWidget {
-  final TextEditingController titleController;
-  final TextEditingController descController;
-  final TextEditingController cityController;
-  final String? bestTime;
-  final Set<String> tags;
-  final Function(String?) onBestTimeChanged;
-  final Function(Set<String>) onTagsChanged;
-
   const _DetailsStep({
     required this.titleController,
     required this.descController,
     required this.cityController,
     required this.bestTime,
     required this.tags,
+    required this.bestTimeOptions,
+    required this.tagOptions,
+    required this.onChanged,
     required this.onBestTimeChanged,
     required this.onTagsChanged,
   });
 
-  static const _tagOptions = [
-    'skyline',
-    'sunset',
-    'street',
-    'architecture',
-    'water',
-    'nightlife',
-    'hidden gem',
-    'reflection',
-    'tiles',
-    'landmark',
-  ];
-  static const _bestTimeOptions = [
-    'Golden hour',
-    'Blue hour',
-    'Morning light',
-    'Night',
-    'Afternoon',
-  ];
+  final TextEditingController titleController;
+  final TextEditingController descController;
+  final TextEditingController cityController;
+  final String? bestTime;
+  final Set<String> tags;
+  final List<String> bestTimeOptions;
+  final List<String> tagOptions;
+  final VoidCallback onChanged;
+  final ValueChanged<String?> onBestTimeChanged;
+  final ValueChanged<Set<String>> onTagsChanged;
 
   @override
   State<_DetailsStep> createState() => _DetailsStepState();
 }
 
 class _DetailsStepState extends State<_DetailsStep> {
-  late String? _bestTime;
-  late Set<String> _tags;
-
-  @override
-  void initState() {
-    super.initState();
-    _bestTime = widget.bestTime;
-    _tags = Set.from(widget.tags);
-  }
-
   @override
   Widget build(BuildContext context) {
     return ListView(
-      padding: const EdgeInsets.symmetric(horizontal: 20),
+      padding: const EdgeInsets.fromLTRB(20, 8, 20, 20),
       children: [
-        const SizedBox(height: 8),
-        _FieldLabel('Spot name'),
+        const _FieldLabel('Spot name'),
         const SizedBox(height: 8),
         TextFormField(
           controller: widget.titleController,
           textCapitalization: TextCapitalization.words,
+          onChanged: (_) => widget.onChanged(),
           style: const TextStyle(color: AppColors.textPrimary),
           decoration: const InputDecoration(
             hintText: 'Miradouro da Senhora do Monte',
-            hintStyle: TextStyle(color: AppColors.textFaint),
           ),
         ),
-        const SizedBox(height: 20),
-        _FieldLabel('What makes it special?'),
+        const SizedBox(height: 18),
+        const _FieldLabel('What makes it special?'),
         const SizedBox(height: 8),
         TextFormField(
           controller: widget.descController,
           maxLines: 4,
           textCapitalization: TextCapitalization.sentences,
+          onChanged: (_) => widget.onChanged(),
           style: const TextStyle(color: AppColors.textPrimary),
           decoration: const InputDecoration(
             hintText: 'Where to stand, when to go, what lens…',
-            hintStyle: TextStyle(color: AppColors.textFaint),
           ),
         ),
-        const SizedBox(height: 20),
-        _FieldLabel('City'),
+        const SizedBox(height: 6),
+        Text(
+          widget.descController.text.trim().length < 10
+              ? 'At least 10 characters.'
+              : 'Nice — that is enough detail.',
+          style: const TextStyle(
+            color: AppColors.textFaint,
+            fontSize: 11.5,
+            fontFamily: 'Inter',
+          ),
+        ),
+        const SizedBox(height: 18),
+        const _FieldLabel('City'),
         const SizedBox(height: 8),
         TextFormField(
           controller: widget.cityController,
           textCapitalization: TextCapitalization.words,
+          onChanged: (_) => widget.onChanged(),
           style: const TextStyle(color: AppColors.textPrimary),
-          decoration: const InputDecoration(
-            hintText: 'Lisbon',
-            hintStyle: TextStyle(color: AppColors.textFaint),
-          ),
+          decoration: const InputDecoration(hintText: 'Lisbon'),
         ),
-        const SizedBox(height: 24),
-        _FieldLabel('Best time to shoot'),
+        const SizedBox(height: 22),
+        const _FieldLabel('Best time to shoot'),
         const SizedBox(height: 10),
         Wrap(
           spacing: 8,
           runSpacing: 8,
           children: [
-            for (final t in _DetailsStep._bestTimeOptions)
+            for (final option in widget.bestTimeOptions)
               _TagChip(
-                label: t,
-                selected: _bestTime == t,
-                onTap: () => setState(() {
-                  _bestTime = _bestTime == t ? null : t;
-                  widget.onBestTimeChanged(_bestTime);
-                }),
+                label: option,
+                selected: widget.bestTime == option,
+                onTap: () => widget.onBestTimeChanged(
+                  widget.bestTime == option ? null : option,
+                ),
               ),
           ],
         ),
-        const SizedBox(height: 24),
-        _FieldLabel('Tags'),
+        const SizedBox(height: 22),
+        const _FieldLabel('Tags'),
         const SizedBox(height: 10),
         Wrap(
           spacing: 8,
           runSpacing: 8,
           children: [
-            for (final t in _DetailsStep._tagOptions)
+            for (final tag in widget.tagOptions)
               _TagChip(
-                label: '#$t',
-                selected: _tags.contains(t),
+                label: '#$tag',
+                selected: widget.tags.contains(tag),
                 onTap: () {
-                  setState(() {
-                    _tags.contains(t) ? _tags.remove(t) : _tags.add(t);
-                  });
-                  widget.onTagsChanged(Set.from(_tags));
+                  final next = Set<String>.from(widget.tags);
+                  if (!next.remove(tag)) next.add(tag);
+                  widget.onTagsChanged(next);
                 },
               ),
           ],
         ),
-        const SizedBox(height: 40),
+        const SizedBox(height: 24),
       ],
     );
   }
@@ -602,6 +763,7 @@ class _DetailsStepState extends State<_DetailsStep> {
 
 class _FieldLabel extends StatelessWidget {
   const _FieldLabel(this.text);
+
   final String text;
 
   @override
@@ -610,7 +772,7 @@ class _FieldLabel extends StatelessWidget {
       text,
       style: const TextStyle(
         color: AppColors.textPrimary,
-        fontSize: 14,
+        fontSize: 13.5,
         fontWeight: FontWeight.w700,
         fontFamily: 'Inter',
       ),
@@ -624,19 +786,22 @@ class _TagChip extends StatelessWidget {
     required this.selected,
     required this.onTap,
   });
+
   final String label;
   final bool selected;
   final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
+    return InkWell(
       onTap: onTap,
+      borderRadius: BorderRadius.circular(999),
       child: AnimatedContainer(
-        duration: const Duration(milliseconds: 160),
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+        duration: AppMotion.instant,
+        constraints: const BoxConstraints(minHeight: 38),
+        padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 8),
         decoration: BoxDecoration(
-          color: selected ? AppColors.action : const Color(0x1AFFFFFF),
+          color: selected ? AppColors.action : const Color(0x14FFFFFF),
           borderRadius: BorderRadius.circular(999),
           border: Border.all(
             color: selected ? AppColors.action : AppColors.hairline,
@@ -646,7 +811,7 @@ class _TagChip extends StatelessWidget {
           label,
           style: TextStyle(
             color: selected ? AppColors.onAction : AppColors.textSecondary,
-            fontSize: 13,
+            fontSize: 12.5,
             fontWeight: selected ? FontWeight.w800 : FontWeight.w600,
             fontFamily: 'Inter',
           ),
@@ -656,126 +821,190 @@ class _TagChip extends StatelessWidget {
   }
 }
 
-// ================= STEP 2: LOCATION =================
-
 class _LocationStep extends StatefulWidget {
-  final LatLng pinned;
-  final Function(LatLng) onPinMoved;
-
   const _LocationStep({required this.pinned, required this.onPinMoved});
+
+  final LatLng pinned;
+  final ValueChanged<LatLng> onPinMoved;
 
   @override
   State<_LocationStep> createState() => _LocationStepState();
 }
 
 class _LocationStepState extends State<_LocationStep> {
-  late LatLng _pinned;
+  final _mapController = MapController();
+  late LatLng _center;
 
   @override
   void initState() {
     super.initState();
-    _pinned = widget.pinned;
+    _center = widget.pinned;
+  }
+
+  @override
+  void dispose() {
+    _mapController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _useMyLocation() async {
+    final state = context.read<AppState>();
+    final messenger = ScaffoldMessenger.of(context);
+    final ok = await state.requestLocation();
+    if (!mounted) return;
+
+    if (!ok || state.userLocation == null) {
+      messenger.showSnackBar(
+        SnackBar(content: Text(state.locationError ?? 'Location unavailable.')),
+      );
+      return;
+    }
+
+    final point = LatLng(
+      state.userLocation!.latitude,
+      state.userLocation!.longitude,
+    );
+    _mapController.move(point, 16);
+    setState(() => _center = point);
+    widget.onPinMoved(point);
   }
 
   @override
   Widget build(BuildContext context) {
-    return Column(
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(20, 8, 20, 20),
       children: [
-        const SizedBox(height: 24),
         const Text(
-          'Drop the pin',
-          style: TextStyle(
-            color: AppColors.textPrimary,
-            fontSize: 17,
-            fontWeight: FontWeight.w800,
-            fontFamily: 'Inter',
-          ),
-        ),
-        const SizedBox(height: 6),
-        const Text(
-          'Drag the map so the marker sits on your spot',
+          'Drag the map so the pin sits on the spot',
           style: TextStyle(
             color: AppColors.textSecondary,
-            fontSize: 14,
+            fontSize: 13,
             fontFamily: 'Inter',
           ),
         ),
-        const SizedBox(height: 16),
+        const SizedBox(height: 14),
         Container(
-          height: 300,
+          height: 320,
+          clipBehavior: Clip.antiAlias,
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(20),
             border: Border.all(color: AppColors.hairline),
           ),
-          child: ClipRRect(
-            borderRadius: BorderRadius.circular(20),
-            child: Stack(
-              alignment: Alignment.center,
-              children: [
-                FlutterMap(
-                  options: MapOptions(
-                    initialCenter: _pinned,
-                    initialZoom: 13,
-                    backgroundColor: AppColors.mapBackground,
-                    // NO rotation — drag and zoom only.
-                    interactionOptions: const InteractionOptions(
-                      flags: InteractiveFlag.drag |
-                          InteractiveFlag.pinchZoom |
-                          InteractiveFlag.doubleTapZoom |
-                          InteractiveFlag.flingAnimation,
-                    ),
-                    onPositionChanged: (camera, _) {
-                      final c = camera.center;
-                      if ((c.latitude - _pinned.latitude).abs() > 1e-5 ||
-                          (c.longitude - _pinned.longitude).abs() > 1e-5) {
-                        setState(() => _pinned = c);
-                        widget.onPinMoved(c);
-                      }
-                    },
+          child: Stack(
+            alignment: Alignment.center,
+            children: [
+              FlutterMap(
+                mapController: _mapController,
+                options: MapOptions(
+                  initialCenter: _center,
+                  initialZoom: 14,
+                  maxZoom: 18,
+                  backgroundColor: AppColors.mapBackground,
+                  interactionOptions: const InteractionOptions(
+                    flags: InteractiveFlag.drag |
+                        InteractiveFlag.pinchZoom |
+                        InteractiveFlag.doubleTapZoom |
+                        InteractiveFlag.flingAnimation,
                   ),
-                  children: [
-                    TileLayer(
-                      urlTemplate:
-                          'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-                      userAgentPackageName: 'com.photospot.app',
-                    ),
-                  ],
+                  onPositionChanged: (camera, _) {
+                    final next = camera.center;
+                    if ((next.latitude - _center.latitude).abs() > 1e-6 ||
+                        (next.longitude - _center.longitude).abs() > 1e-6) {
+                      setState(() => _center = next);
+                      widget.onPinMoved(next);
+                    }
+                  },
                 ),
-                IgnorePointer(
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Container(
-                        padding: const EdgeInsets.all(8),
-                        decoration: const BoxDecoration(
-                          color: AppColors.textPrimary,
-                          shape: BoxShape.circle,
-                          boxShadow: [
-                            BoxShadow(
-                              color: Colors.black54,
-                              blurRadius: 10,
-                              offset: Offset(0, 4),
-                            ),
-                          ],
+                children: [
+                  TileLayer(
+                    urlTemplate:
+                        'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
+                    subdomains: const ['a', 'b', 'c', 'd'],
+                    userAgentPackageName: 'com.photospot.app',
+                    maxZoom: 18,
+                    retinaMode: RetinaMode.isHighDensity(context),
+                  ),
+                  RichAttributionWidget(
+                    alignment: AttributionAlignment.bottomLeft,
+                    attributions: [
+                      TextSourceAttribution(
+                        'OpenStreetMap contributors',
+                        onTap: () => launchUrl(
+                          Uri.parse('https://www.openstreetmap.org/copyright'),
                         ),
-                        child: const Icon(Icons.photo_camera_rounded,
-                            color: AppColors.onAction, size: 22),
                       ),
-                      const Icon(Icons.arrow_drop_down_rounded,
-                          color: AppColors.textPrimary, size: 30),
+                      TextSourceAttribution(
+                        'CARTO',
+                        onTap: () => launchUrl(
+                          Uri.parse('https://carto.com/attributions'),
+                        ),
+                      ),
                     ],
                   ),
+                ],
+              ),
+              IgnorePointer(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.all(9),
+                      decoration: const BoxDecoration(
+                        color: AppColors.action,
+                        shape: BoxShape.circle,
+                        boxShadow: [
+                          BoxShadow(
+                            color: Colors.black54,
+                            blurRadius: 10,
+                            offset: Offset(0, 4),
+                          ),
+                        ],
+                      ),
+                      child: const Icon(Icons.photo_camera_rounded,
+                          color: AppColors.onAction, size: 21),
+                    ),
+                    const Icon(Icons.arrow_drop_down_rounded,
+                        color: AppColors.textPrimary, size: 28),
+                  ],
                 ),
-              ],
-            ),
+              ),
+            ],
           ),
         ),
         const SizedBox(height: 12),
+        Row(
+          children: [
+            const Expanded(
+              child: Text(
+                'Pin set on the map',
+                style: TextStyle(
+                  color: AppColors.textSecondary,
+                  fontSize: 12.5,
+                  fontFamily: 'Inter',
+                ),
+              ),
+            ),
+            TextButton.icon(
+              onPressed: _useMyLocation,
+              icon: const Icon(Icons.my_location_rounded, size: 16),
+              label: const Text('Use my location'),
+              style: TextButton.styleFrom(
+                foregroundColor: AppColors.textPrimary,
+                textStyle: const TextStyle(
+                  fontFamily: 'Inter',
+                  fontSize: 12.5,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+          ],
+        ),
         Text(
-          'Pin set on the map',
+          '${_center.latitude.toStringAsFixed(5)}, '
+          '${_center.longitude.toStringAsFixed(5)}',
           style: const TextStyle(
-            color: AppColors.textSecondary,
-            fontSize: 13,
+            color: AppColors.textFaint,
+            fontSize: 11.5,
             fontFamily: 'Inter',
           ),
         ),
@@ -784,154 +1013,157 @@ class _LocationStepState extends State<_LocationStep> {
   }
 }
 
-// ================= STEP 3: REVIEW =================
-
 class _ReviewStep extends StatelessWidget {
-  final String title;
-  final String description;
-  final String city;
-  final String? bestTime;
-  final Set<String> tags;
-  final XFile? photoFile;
-
   const _ReviewStep({
+    required this.photoBytes,
     required this.title,
     required this.description,
     required this.city,
     required this.bestTime,
     required this.tags,
-    required this.photoFile,
+    required this.latitude,
+    required this.longitude,
   });
+
+  final Uint8List? photoBytes;
+  final String title;
+  final String description;
+  final String city;
+  final String? bestTime;
+  final List<String> tags;
+  final double latitude;
+  final double longitude;
 
   @override
   Widget build(BuildContext context) {
-    return Column(
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(20, 8, 20, 20),
       children: [
-        const SizedBox(height: 24),
-        const Text(
-          'Review before publishing',
-          style: TextStyle(
+        ClipRRect(
+          borderRadius: BorderRadius.circular(20),
+          child: Container(
+            height: 220,
+            color: AppColors.surfaceElevated,
+            child: photoBytes != null
+                ? Image.memory(photoBytes!, fit: BoxFit.cover)
+                : const Center(
+                    child: Icon(Icons.landscape_rounded,
+                        color: AppColors.textFaint, size: 40),
+                  ),
+          ),
+        ),
+        const SizedBox(height: 16),
+        Text(
+          title,
+          style: const TextStyle(
             color: AppColors.textPrimary,
-            fontSize: 17,
+            fontSize: 21,
             fontWeight: FontWeight.w800,
+            letterSpacing: -0.5,
+            fontFamily: 'Inter',
+          ),
+        ),
+        const SizedBox(height: 6),
+        Row(
+          children: [
+            const Icon(Icons.place_rounded,
+                color: AppColors.textSecondary, size: 14),
+            const SizedBox(width: 4),
+            Text(
+              city,
+              style: const TextStyle(
+                color: AppColors.textSecondary,
+                fontSize: 13,
+                fontFamily: 'Inter',
+              ),
+            ),
+            const SizedBox(width: 12),
+            const Icon(Icons.near_me_rounded,
+                color: AppColors.textFaint, size: 13),
+            const SizedBox(width: 4),
+            Text(
+              '${latitude.toStringAsFixed(4)}, ${longitude.toStringAsFixed(4)}',
+              style: const TextStyle(
+                color: AppColors.textFaint,
+                fontSize: 11.5,
+                fontFamily: 'Inter',
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 12),
+        Text(
+          description,
+          style: const TextStyle(
+            color: AppColors.textSecondary,
+            fontSize: 14,
+            height: 1.55,
+            fontFamily: 'Inter',
+          ),
+        ),
+        if (bestTime != null) ...[
+          const SizedBox(height: 14),
+          Row(
+            children: [
+              const Icon(Icons.wb_sunny_outlined,
+                  color: AppColors.catSunset, size: 15),
+              const SizedBox(width: 6),
+              Text(
+                'Best shot: $bestTime',
+                style: const TextStyle(
+                  color: AppColors.textPrimary,
+                  fontSize: 12.5,
+                  fontWeight: FontWeight.w600,
+                  fontFamily: 'Inter',
+                ),
+              ),
+            ],
+          ),
+        ],
+        if (tags.isNotEmpty) ...[
+          const SizedBox(height: 14),
+          Wrap(
+            spacing: 7,
+            runSpacing: 7,
+            children: [
+              for (final tag in tags)
+                Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                  decoration: BoxDecoration(
+                    color: AppColors.surfaceElevated,
+                    borderRadius: BorderRadius.circular(999),
+                    border: Border.all(color: AppColors.hairline),
+                  ),
+                  child: Text(
+                    '#$tag',
+                    style: const TextStyle(
+                      color: AppColors.textSecondary,
+                      fontSize: 11.5,
+                      fontFamily: 'Inter',
+                    ),
+                  ),
+                ),
+            ],
+          ),
+        ],
+        const SizedBox(height: 18),
+        const Text(
+          'Your spot will appear on the map for everyone to discover.',
+          style: TextStyle(
+            color: AppColors.textFaint,
+            fontSize: 12,
+            height: 1.45,
             fontFamily: 'Inter',
           ),
         ),
         const SizedBox(height: 6),
         const Text(
-          'Your spot will appear on the map for everyone to discover',
+          'The photo is stored with the spot.',
           style: TextStyle(
-            color: AppColors.textSecondary,
-            fontSize: 14,
+            color: AppColors.textFaint,
+            fontSize: 11.5,
             fontFamily: 'Inter',
-          ),
-        ),
-        const SizedBox(height: 24),
-        Container(
-          width: double.infinity,
-          height: 200,
-          decoration: BoxDecoration(
-            color: AppColors.surfaceElevated,
-            borderRadius: BorderRadius.circular(20),
-            border: Border.all(color: AppColors.hairline),
-          ),
-          child: photoFile != null
-              ? ClipRRect(
-                  borderRadius: BorderRadius.circular(20),
-                  child: Image.file(
-                    File(photoFile!.path),
-                    fit: BoxFit.cover,
-                  ),
-                )
-              : const Center(
-                  child: Icon(Icons.landscape_rounded,
-                      color: AppColors.textFaint, size: 44)),
-        ),
-        const SizedBox(height: 16),
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 20),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              if (title.isNotEmpty) ...[
-                Text(
-                  title,
-                  style: const TextStyle(
-                    color: AppColors.textPrimary,
-                    fontSize: 18,
-                    fontWeight: FontWeight.w800,
-                    letterSpacing: -0.5,
-                    fontFamily: 'Inter',
-                  ),
-                ),
-                const SizedBox(height: 8),
-                Row(
-                  children: [
-                    const Icon(Icons.place_rounded,
-                        color: AppColors.textSecondary, size: 16),
-                    const SizedBox(width: 6),
-                    Text(
-                      city,
-                      style: const TextStyle(
-                        color: AppColors.textSecondary,
-                        fontSize: 14,
-                        fontFamily: 'Inter',
-                      ),
-                    ),
-                    const Spacer(),
-                    if (tags.isNotEmpty)
-                      Text(
-                        '${tags.length} tags',
-                        style: const TextStyle(
-                          color: AppColors.textSecondary,
-                          fontSize: 14,
-                          fontFamily: 'Inter',
-                        ),
-                      ),
-                  ],
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  description,
-                  maxLines: 3,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                    color: AppColors.textSecondary,
-                    fontSize: 13.5,
-                    height: 1.5,
-                    fontFamily: 'Inter',
-                  ),
-                ),
-              ],
-              if (bestTime != null) ...[
-                const SizedBox(height: 16),
-                Container(
-                  padding: const EdgeInsets.symmetric(
-                      horizontal: 12, vertical: 6),
-                  decoration: BoxDecoration(
-                    color: AppColors.surfaceElevated,
-                    borderRadius: BorderRadius.circular(999),
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      const Icon(Icons.wb_sunny_outlined,
-                          color: AppColors.catSunset, size: 15),
-                      const SizedBox(width: 6),
-                      Text(
-                        'Best shot: $bestTime',
-                        style: const TextStyle(
-                          color: AppColors.textPrimary,
-                          fontSize: 12.5,
-                          fontWeight: FontWeight.w600,
-                          fontFamily: 'Inter',
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            ],
           ),
         ),
       ],

@@ -2,14 +2,22 @@ import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:provider/provider.dart';
-import 'package:geolocator/geolocator.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../models/spot.dart';
 import '../state/app_state.dart';
+import '../state/settings_state.dart';
+import '../theme/app_animations.dart';
 import '../theme/app_theme.dart';
-import 'spot_detail_screen.dart';
+import '../utils/actions.dart';
+import '../utils/categories.dart';
+import '../utils/format.dart';
+import '../utils/navigation.dart';
+import '../widgets/spot_image.dart';
 
-/// Map screen — optimized, no rotation, accurate pins, proper tile loading.
+enum _MapSort { nearest, topRated, saved }
+
+/// Map screen — category pins, filters, sorting, and a floating spot card.
 class MapScreen extends StatefulWidget {
   const MapScreen({super.key});
 
@@ -21,12 +29,45 @@ class _MapScreenState extends State<MapScreen> {
   final _mapController = MapController();
   final _searchController = TextEditingController();
 
-  Spot? _selected;
-  String _filter = 'All';
+  String? _selectedId;
+  String? _filterTag;
+  String _query = '';
+  _MapSort _sort = _MapSort.nearest;
   bool _mapReady = false;
+  LatLng? _lastCenteredLocation;
 
-  static const _filters = ['All', 'Date', 'Friends', 'Sunset', 'Photo'];
-  static const _fallbackCenter = LatLng(38.7128, -9.1393);
+  /// Moves the camera only once the map has been laid out, so an early tap or
+  /// a location fix that arrives during startup cannot throw.
+  void _moveMap(LatLng point, double zoom) {
+    if (!_mapReady) return;
+    try {
+      _mapController.move(point, zoom);
+    } catch (_) {
+      // The controller is not attached yet; the next fix will center it.
+    }
+  }
+
+  /// Centers on the first real location fix, but never fights the user's
+  /// panning afterwards.
+  void _centerOnUserOnce(AppState state) {
+    if (!_mapReady || !state.hasUserLocation) return;
+    final location = state.referenceLocation;
+    if (_lastCenteredLocation == location) return;
+    _lastCenteredLocation = location;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _moveMap(location, 13.5);
+    });
+  }
+
+  /// The selected spot, but only while it is visible under the active filter
+  /// and search query.
+  Spot? _selectedIn(List<Spot> spots) {
+    if (_selectedId == null) return null;
+    for (final spot in spots) {
+      if (spot.id == _selectedId) return spot;
+    }
+    return null;
+  }
 
   @override
   void dispose() {
@@ -35,215 +76,273 @@ class _MapScreenState extends State<MapScreen> {
     super.dispose();
   }
 
-  Future<void> _goToMyLocation() async {
-    bool serviceEnabled;
-    LocationPermission permission;
-
-    serviceEnabled = await Geolocator.isLocationServiceEnabled();
-    if (!serviceEnabled) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Location services are disabled')),
-      );
-      return;
-    }
-
-    permission = await Geolocator.checkPermission();
-    if (permission == LocationPermission.denied) {
-      permission = await Geolocator.requestPermission();
-      if (permission == LocationPermission.denied) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Location permission denied')),
-        );
-        return;
-      }
-    }
-
-    if (permission == LocationPermission.deniedForever) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Location permission permanently denied')),
-      );
-      return;
-    }
-
-    final position = await Geolocator.getCurrentPosition(
-      desiredAccuracy: LocationAccuracy.high,
-    );
-    _mapController.move(LatLng(position.latitude, position.longitude), 14);
-  }
-
   List<Spot> _visible(AppState state) {
-    var list = List<Spot>.from(state.spots);
-    if (_filter != 'All') {
-      list = list.where((s) => s.tags.any((t) =>
-          t.toLowerCase().contains(_filter.toLowerCase()))).toList();
-    }
-    final q = _searchController.text.toLowerCase();
-    if (q.isNotEmpty) {
-      list = list.where((s) =>
-          s.title.toLowerCase().contains(q) ||
-          s.city.toLowerCase().contains(q)).toList();
+    var list = state.spots.where((spot) {
+      if (_filterTag != null &&
+          !spot.tags.any(
+            (tag) => tag.toLowerCase() == _filterTag!.toLowerCase(),
+          )) {
+        return false;
+      }
+      final query = _query.trim().toLowerCase();
+      if (query.isEmpty) return true;
+      return spot.title.toLowerCase().contains(query) ||
+          spot.city.toLowerCase().contains(query) ||
+          spot.tags.any((tag) => tag.toLowerCase().contains(query));
+    }).toList();
+
+    final origin = state.referenceLocation;
+    switch (_sort) {
+      case _MapSort.nearest:
+        list.sort((a, b) => state
+            .distanceKm(origin, a)
+            .compareTo(state.distanceKm(origin, b)));
+      case _MapSort.topRated:
+        list.sort((a, b) => b.rating.compareTo(a.rating));
+      case _MapSort.saved:
+        list.sort((a, b) => b.saveCount.compareTo(a.saveCount));
     }
     return list;
+  }
+
+  Future<void> _goToMyLocation() async {
+    final state = context.read<AppState>();
+    final messenger = ScaffoldMessenger.of(context);
+    final ok = await state.requestLocation();
+    if (!mounted) return;
+
+    if (!ok || state.userLocation == null) {
+      messenger.showSnackBar(
+        SnackBar(
+          content: Text(state.locationError ?? 'Location is unavailable.'),
+        ),
+      );
+      return;
+    }
+
+    _moveMap(
+      LatLng(state.userLocation!.latitude, state.userLocation!.longitude),
+      14,
+    );
+  }
+
+  Future<void> _openSortSheet() async {
+    final selected = await showModalBottomSheet<_MapSort>(
+      context: context,
+      showDragHandle: true,
+      builder: (sheetContext) {
+        Widget option(_MapSort value, IconData icon, String label) {
+          final active = value == _sort;
+          return ListTile(
+            onTap: () => Navigator.of(sheetContext).pop(value),
+            leading: Icon(icon,
+                color: active ? AppColors.accent : AppColors.textSecondary),
+            title: Text(
+              label,
+              style: TextStyle(
+                color: active
+                    ? AppColors.textPrimary
+                    : AppColors.textSecondary,
+                fontFamily: 'Inter',
+                fontWeight: active ? FontWeight.w800 : FontWeight.w600,
+              ),
+            ),
+            trailing: active
+                ? const Icon(Icons.check_rounded, color: AppColors.accent)
+                : null,
+          );
+        }
+
+        return SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Padding(
+                padding: EdgeInsets.fromLTRB(20, 0, 20, 6),
+                child: Align(
+                  alignment: Alignment.centerLeft,
+                  child: Text(
+                    'Sort spots',
+                    style: TextStyle(
+                      color: AppColors.textPrimary,
+                      fontSize: 16,
+                      fontWeight: FontWeight.w800,
+                      fontFamily: 'Inter',
+                    ),
+                  ),
+                ),
+              ),
+              option(_MapSort.nearest, Icons.near_me_rounded, 'Nearest'),
+              option(_MapSort.topRated, Icons.star_outline_rounded,
+                  'Top rated'),
+              option(_MapSort.saved, Icons.bookmark_outline_rounded,
+                  'Most saved'),
+              const SizedBox(height: 12),
+            ],
+          ),
+        );
+      },
+    );
+
+    if (selected != null && mounted) {
+      setState(() => _sort = selected);
+    }
   }
 
   @override
   Widget build(BuildContext context) {
     final state = context.watch<AppState>();
+    final settings = context.watch<SettingsState>();
     final spots = _visible(state);
+    final selected = _selectedIn(spots);
+    final origin = state.referenceLocation;
+    _centerOnUserOnce(state);
 
     return Stack(
       children: [
-        FlutterMap(
-          mapController: _mapController,
-          options: MapOptions(
-            initialCenter: _fallbackCenter,
-            initialZoom: 12.5,
-            minZoom: 4,
-            maxZoom: 17,
-            backgroundColor: AppColors.mapBackground,
-            interactionOptions: const InteractionOptions(
-              flags: InteractiveFlag.drag |
-                  InteractiveFlag.pinchZoom |
-                  InteractiveFlag.doubleTapZoom |
-                  InteractiveFlag.flingAnimation,
-            ),
-            onMapReady: () => setState(() => _mapReady = true),
-            onTap: (_, __) {
-              setState(() => _selected = null);
-              FocusManager.instance.primaryFocus?.unfocus();
-            },
-          ),
-          children: [
-            TileLayer(
-              urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-              userAgentPackageName: 'com.photospot.app',
-              maxZoom: 17,
-              errorTileCallback: (tile, error, stackTrace) {
-                // Silent fail — keep showing existing tiles
+        Positioned.fill(
+          child: FlutterMap(
+            mapController: _mapController,
+            options: MapOptions(
+              initialCenter: state.hasUserLocation
+                  ? origin
+                  : AppState.fallbackCenter,
+              initialZoom: 12.5,
+              minZoom: 4,
+              maxZoom: 18,
+              backgroundColor: AppColors.mapBackground,
+              interactionOptions: const InteractionOptions(
+                flags: InteractiveFlag.drag |
+                    InteractiveFlag.pinchZoom |
+                    InteractiveFlag.doubleTapZoom |
+                    InteractiveFlag.flingAnimation,
+              ),
+              onMapReady: () {
+                _mapReady = true;
+                if (state.hasUserLocation) {
+                  _lastCenteredLocation = state.referenceLocation;
+                  _moveMap(state.referenceLocation, 13.5);
+                }
+              },
+              onTap: (_, _) {
+                setState(() => _selectedId = null);
+                FocusManager.instance.primaryFocus?.unfocus();
               },
             ),
+            children: [
+            TileLayer(
+              urlTemplate:
+                  'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
+              subdomains: const ['a', 'b', 'c', 'd'],
+              userAgentPackageName: 'com.photospot.app',
+              maxZoom: 18,
+              retinaMode: RetinaMode.isHighDensity(context),
+            ),
             MarkerLayer(
-              markers: spots.map((spot) {
-                final selected = _selected?.id == spot.id;
-                return Marker(
-                  point: spot.location,
-                  width: selected ? 64 : 48,
-                  height: selected ? 64 : 48,
-                  alignment: Alignment.center,
-                  child: GestureDetector(
-                    onTap: () {
-                      setState(() => _selected = spot);
-                      _mapController.move(spot.location, 15);
-                    },
+              markers: [
+                if (state.userLocation != null)
+                  Marker(
+                    point: origin,
+                    width: 22,
+                    height: 22,
                     child: Container(
-                      padding: const EdgeInsets.all(3),
                       decoration: BoxDecoration(
-                        color: Colors.white,
+                        color: const Color(0xFF3B82F6),
                         shape: BoxShape.circle,
-                        boxShadow: [
-                          BoxShadow(
-                            color: Colors.black.withValues(alpha: 0.5),
-                            blurRadius: 12,
-                            offset: const Offset(0, 5),
-                          ),
+                        border: Border.all(color: Colors.white, width: 3),
+                        boxShadow: const [
+                          BoxShadow(color: Color(0x66000000), blurRadius: 8),
                         ],
-                      ),
-                      child: ClipOval(
-                        child: Image.network(
-                          spot.coverUrl,
-                          width: selected ? 52 : 38,
-                          height: selected ? 52 : 38,
-                          fit: BoxFit.cover,
-                          errorBuilder: (_, __, ___) => Container(
-                            width: 38,
-                            height: 38,
-                            color: AppColors.surfaceElevated,
-                            child: const Icon(Icons.place_rounded,
-                                color: AppColors.textFaint, size: 18),
-                          ),
-                        ),
                       ),
                     ),
                   ),
-                );
-              }).toList(),
+                for (final spot in spots)
+                  _spotMarker(
+                    spot: spot,
+                    selected: spot.id == _selectedId,
+                    showPhoto: settings.mapPhotoPins,
+                  ),
+              ],
+            ),
+            RichAttributionWidget(
+              alignment: AttributionAlignment.bottomLeft,
+              attributions: [
+                TextSourceAttribution(
+                  'OpenStreetMap contributors',
+                  onTap: () => launchUrl(
+                    Uri.parse('https://www.openstreetmap.org/copyright'),
+                  ),
+                ),
+                TextSourceAttribution(
+                  'CARTO',
+                  onTap: () => launchUrl(
+                    Uri.parse('https://carto.com/attributions'),
+                  ),
+                ),
+              ],
             ),
           ],
+          ),
         ),
 
-        // Top bar: search + filters.
+        // Search bar.
         Positioned(
           top: 0,
           left: 0,
           right: 0,
           child: SafeArea(
             child: Padding(
-              padding: const EdgeInsets.fromLTRB(16, 10, 16, 0),
-              child: Column(
+              padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+              child: Row(
                 children: [
-                  TextField(
-                    controller: _searchController,
-                    onChanged: (_) => setState(() {}),
-                    style: const TextStyle(color: AppColors.textPrimary),
-                    decoration: InputDecoration(
-                      hintText: 'Search places...',
-                      filled: true,
-                      fillColor: const Color(0xF2161618),
-                      contentPadding: const EdgeInsets.symmetric(
-                          horizontal: 16, vertical: 14),
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(16),
-                        borderSide: const BorderSide(color: AppColors.hairline),
+                  Expanded(
+                    child: TextField(
+                      controller: _searchController,
+                      onChanged: (value) => setState(() => _query = value),
+                      style: const TextStyle(
+                        color: AppColors.textPrimary,
+                        fontFamily: 'Inter',
+                        fontSize: 14.5,
                       ),
-                      focusedBorder: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(16),
-                        borderSide: const BorderSide(color: AppColors.hairline),
+                      decoration: InputDecoration(
+                        hintText: 'Search places…',
+                        fillColor: const Color(0xF20F0F11),
+                        contentPadding: const EdgeInsets.symmetric(
+                            horizontal: 14, vertical: 13),
+                        prefixIcon: const Icon(Icons.search_rounded,
+                            color: AppColors.textSecondary, size: 20),
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(14),
+                          borderSide:
+                              const BorderSide(color: AppColors.hairline),
+                        ),
+                        enabledBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(14),
+                          borderSide:
+                              const BorderSide(color: AppColors.hairline),
+                        ),
+                        focusedBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(14),
+                          borderSide:
+                              const BorderSide(color: AppColors.hairline),
+                        ),
                       ),
                     ),
                   ),
-                  const SizedBox(height: 12),
-                  SizedBox(
-                    height: 38,
-                    child: ListView.separated(
-                      scrollDirection: Axis.horizontal,
-                      itemCount: _filters.length,
-                      separatorBuilder: (_, _) => const SizedBox(width: 8),
-                      itemBuilder: (_, i) {
-                        final f = _filters[i];
-                        final selected = f == _filter;
-                        return GestureDetector(
-                          onTap: () => setState(() => _filter = f),
-                          child: AnimatedContainer(
-                            duration: const Duration(milliseconds: 160),
-                            padding: const EdgeInsets.symmetric(
-                                horizontal: 16, vertical: 8),
-                            decoration: BoxDecoration(
-                              color: selected
-                                  ? AppColors.action
-                                  : const Color(0xF2161618),
-                              borderRadius: BorderRadius.circular(999),
-                              border: Border.all(
-                                color: selected
-                                    ? AppColors.action
-                                    : AppColors.hairline,
-                              ),
-                            ),
-                            child: Text(
-                              f,
-                              style: TextStyle(
-                                color: selected
-                                    ? AppColors.onAction
-                                    : AppColors.textSecondary,
-                                fontSize: 13.5,
-                                fontWeight: selected
-                                    ? FontWeight.w800
-                                    : FontWeight.w600,
-                                fontFamily: 'Inter',
-                              ),
-                            ),
-                          ),
-                        );
-                      },
+                  const SizedBox(width: 8),
+                  PressButton(
+                    semanticLabel: 'Sort spots',
+                    onTap: _openSortSheet,
+                    child: Container(
+                      width: 46,
+                      height: 46,
+                      decoration: BoxDecoration(
+                        color: const Color(0xF20F0F11),
+                        borderRadius: BorderRadius.circular(14),
+                        border: Border.all(color: AppColors.hairline),
+                      ),
+                      child: const Icon(Icons.tune_rounded,
+                          color: AppColors.textPrimary, size: 20),
                     ),
                   ),
                 ],
@@ -252,89 +351,274 @@ class _MapScreenState extends State<MapScreen> {
           ),
         ),
 
-        // My location button.
+        // Filter chips.
         Positioned(
-          right: 16,
-          bottom: 128,
-          child: Material(
-            color: Colors.transparent,
-            child: InkWell(
-              onTap: _goToMyLocation,
-              borderRadius: BorderRadius.circular(14),
-              child: Container(
-                width: 48,
-                height: 48,
-                decoration: BoxDecoration(
-                  color: AppColors.surfaceElevated,
-                  borderRadius: BorderRadius.circular(14),
-                  border: Border.all(color: AppColors.hairline),
+          top: 0,
+          left: 0,
+          right: 0,
+          child: SafeArea(
+            child: Padding(
+              padding: const EdgeInsets.only(top: 66),
+              child: SizedBox(
+                height: 40,
+                child: ListView.separated(
+                  scrollDirection: Axis.horizontal,
+                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                  itemCount: spotFilters.length,
+                  separatorBuilder: (_, _) => const SizedBox(width: 8),
+                  itemBuilder: (_, i) {
+                    final filter = spotFilters[i];
+                    final active = filter.tag == _filterTag;
+                    return GestureDetector(
+                      onTap: () => setState(() {
+                        // Tapping the active chip clears it; "All" always
+                        // resets the filter.
+                        _filterTag = filter.tag == null || active
+                            ? null
+                            : filter.tag;
+                        if (_selectedId != null &&
+                            !_visible(state).any((s) => s.id == _selectedId)) {
+                          _selectedId = null;
+                        }
+                      }),
+                      child: AnimatedContainer(
+                        duration: AppMotion.instant,
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 15, vertical: 7),
+                        decoration: BoxDecoration(
+                          color: active
+                              ? AppColors.action
+                              : const Color(0xF20F0F11),
+                          borderRadius: BorderRadius.circular(999),
+                          border: Border.all(
+                            color: active
+                                ? AppColors.action
+                                : AppColors.hairline,
+                          ),
+                        ),
+                        child: Text(
+                          filter.label,
+                          style: TextStyle(
+                            color: active
+                                ? AppColors.onAction
+                                : AppColors.textSecondary,
+                            fontSize: 12.5,
+                            fontWeight:
+                                active ? FontWeight.w800 : FontWeight.w600,
+                            fontFamily: 'Inter',
+                          ),
+                        ),
+                      ),
+                    );
+                  },
                 ),
-                child: const Icon(Icons.my_location_rounded,
-                    color: AppColors.textPrimary, size: 24),
               ),
             ),
           ),
         ),
 
-        // Floating place card.
-        if (_selected != null)
-          Positioned(
-            left: 16,
-            right: 16,
-            bottom: 196,
-            child: _PlaceCard(spot: _selected!, saved: state.isSaved(_selected!.id)),
+        // Location button. Lifted above the floating spot card when one is
+        // open so the two never overlap.
+        AnimatedPositioned(
+          duration: AppMotion.quick,
+          curve: AppMotion.easeOut,
+          right: 16,
+          bottom: selected != null ? 244 : 132,
+          child: PressButton(
+            semanticLabel: 'Go to my location',
+            onTap: _goToMyLocation,
+            child: Container(
+              width: 46,
+              height: 46,
+              decoration: BoxDecoration(
+                color: const Color(0xF20F0F11),
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(color: AppColors.hairline),
+              ),
+              child: state.locationLoading
+                  ? const Padding(
+                      padding: EdgeInsets.all(14),
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : const Icon(Icons.my_location_rounded,
+                      color: AppColors.textPrimary, size: 21),
+            ),
           ),
+        ),
+
+        if (spots.isEmpty)
+          Positioned(
+            top: 130,
+            left: 24,
+            right: 24,
+            child: Center(
+              child: Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                decoration: BoxDecoration(
+                  color: AppColors.surfaceElevated,
+                  borderRadius: BorderRadius.circular(999),
+                  border: Border.all(color: AppColors.hairline),
+                ),
+                child: const Text(
+                  'No spots match this filter',
+                  style: TextStyle(
+                    color: AppColors.textSecondary,
+                    fontSize: 12.5,
+                    fontFamily: 'Inter',
+                  ),
+                ),
+              ),
+            ),
+          ),
+
+        // Floating spot card, animated in and out as the selection changes.
+        Positioned(
+          left: 0,
+          right: 0,
+          bottom: 132,
+          child: Center(
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 430),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                child: AnimatedSwitcher(
+                  duration: AppMotion.quick,
+                  switchInCurve: AppMotion.easeOut,
+                  switchOutCurve: Curves.easeInCubic,
+                  transitionBuilder: (child, animation) {
+                    return FadeTransition(
+                      opacity: animation,
+                      child: SlideTransition(
+                        position: Tween<Offset>(
+                          begin: const Offset(0, 0.12),
+                          end: Offset.zero,
+                        ).animate(animation),
+                        child: child,
+                      ),
+                    );
+                  },
+                  child: selected == null
+                      ? const SizedBox.shrink(key: ValueKey('no-selection'))
+                      : _PlaceCard(
+                          key: ValueKey(selected.id),
+                          spot: selected,
+                          distanceKm: state.hasUserLocation
+                              ? state.distanceKm(origin, selected)
+                              : null,
+                        ),
+                ),
+              ),
+            ),
+          ),
+        ),
       ],
+    );
+  }
+
+  Marker _spotMarker({
+    required Spot spot,
+    required bool selected,
+    required bool showPhoto,
+  }) {
+    final style = pinStyleForSpot(spot);
+
+    return Marker(
+      point: spot.location,
+      width: selected ? 58 : 42,
+      height: selected ? 58 : 42,
+      alignment: Alignment.center,
+      child: GestureDetector(
+        onTap: () {
+          FocusManager.instance.primaryFocus?.unfocus();
+          setState(() => _selectedId = spot.id);
+          _moveMap(spot.location, 15);
+        },
+        child: selected
+            ? Container(
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  border: Border.all(color: Colors.white, width: 3),
+                  boxShadow: const [
+                    BoxShadow(
+                      color: Color(0x80000000),
+                      blurRadius: 12,
+                      offset: Offset(0, 4),
+                    ),
+                  ],
+                ),
+                child: ClipOval(
+                  child: showPhoto
+                      ? SpotImage(photo: spot.coverPhoto, width: 52, height: 52)
+                      : _iconPin(style),
+                ),
+              )
+            : _iconPin(style),
+      ),
+    );
+  }
+
+  Widget _iconPin(({IconData icon, Color color}) style) {
+    return Container(
+      decoration: BoxDecoration(
+        color: style.color,
+        borderRadius: BorderRadius.circular(13),
+        border: Border.all(color: Colors.white, width: 2),
+        boxShadow: const [
+          BoxShadow(
+            color: Color(0x66000000),
+            blurRadius: 10,
+            offset: Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Icon(style.icon, color: Colors.white, size: 17),
     );
   }
 }
 
 class _PlaceCard extends StatelessWidget {
-  const _PlaceCard({required this.spot, required this.saved});
+  const _PlaceCard({super.key, required this.spot, this.distanceKm});
 
   final Spot spot;
-  final bool saved;
+  final double? distanceKm;
 
   @override
   Widget build(BuildContext context) {
+    final saved = context.watch<AppState>().isSaved(spot.id);
+    final metric = context.watch<SettingsState>().metricUnits;
+
     return GestureDetector(
-      onTap: () {
-        context.read<AppState>().recordView(spot);
-        Navigator.of(context).push(
-          MaterialPageRoute(
-            builder: (_) => SpotDetailScreen(spotId: spot.id),
-          ),
-        );
-      },
+      onTap: () => openSpot(context, spot),
       child: Container(
-        padding: const EdgeInsets.all(10),
+        padding: const EdgeInsets.all(9),
         decoration: BoxDecoration(
-          color: const Color(0xF2161618),
-          borderRadius: BorderRadius.circular(20),
+          color: const Color(0xF2121214),
+          borderRadius: BorderRadius.circular(18),
           border: Border.all(color: AppColors.hairline),
+          boxShadow: const [
+            BoxShadow(
+              color: Color(0x66000000),
+              blurRadius: 20,
+              offset: Offset(0, 8),
+            ),
+          ],
         ),
         child: Row(
           children: [
             ClipRRect(
               borderRadius: BorderRadius.circular(12),
-              child: Image.network(
-                spot.coverUrl,
-                width: 62,
-                height: 62,
-                fit: BoxFit.cover,
-                errorBuilder: (_, _, _) => Container(
-                  width: 62,
-                  height: 62,
-                  color: AppColors.surfaceElevated,
-                  child: const Icon(Icons.landscape_rounded,
-                      color: AppColors.textFaint),
-                ),
+              child: SpotImage(
+                photo: spot.coverPhoto,
+                width: 64,
+                height: 64,
               ),
             ),
-            const SizedBox(width: 12),
+            const SizedBox(width: 11),
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
                 children: [
                   Text(
                     spot.title,
@@ -342,7 +626,7 @@ class _PlaceCard extends StatelessWidget {
                     overflow: TextOverflow.ellipsis,
                     style: const TextStyle(
                       color: AppColors.textPrimary,
-                      fontSize: 15.5,
+                      fontSize: 15,
                       fontWeight: FontWeight.w800,
                       letterSpacing: -0.3,
                       fontFamily: 'Inter',
@@ -352,7 +636,7 @@ class _PlaceCard extends StatelessWidget {
                   Row(
                     children: [
                       const Icon(Icons.star_rounded,
-                          color: AppColors.star, size: 14),
+                          color: AppColors.star, size: 13),
                       const SizedBox(width: 3),
                       Text(
                         spot.rating.toStringAsFixed(1),
@@ -364,19 +648,30 @@ class _PlaceCard extends StatelessWidget {
                         ),
                       ),
                       Text(
-                        ' (${spot.reviewCount >= 1000 ? '${(spot.reviewCount / 1000).toStringAsFixed(1)}k' : spot.reviewCount})',
+                        ' (${formatCount(spot.reviewCount)})',
                         style: const TextStyle(
-                            color: AppColors.textFaint, fontSize: 12, fontFamily: 'Inter'),
+                          color: AppColors.textFaint,
+                          fontSize: 12,
+                          fontFamily: 'Inter',
+                        ),
                       ),
                       const SizedBox(width: 8),
-                      const Icon(Icons.place_rounded,
-                          color: AppColors.textFaint, size: 13),
-                      const Text(
-                        '3.2 km',
-                        style: TextStyle(
+                      const Icon(Icons.near_me_rounded,
+                          color: AppColors.textFaint, size: 12),
+                      const SizedBox(width: 3),
+                      Flexible(
+                        child: Text(
+                          distanceKm != null
+                              ? formatDistance(distanceKm!, metric: metric)
+                              : spot.city,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
                             color: AppColors.textFaint,
                             fontSize: 12,
-                            fontFamily: 'Inter'),
+                            fontFamily: 'Inter',
+                          ),
+                        ),
                       ),
                     ],
                   ),
@@ -385,27 +680,34 @@ class _PlaceCard extends StatelessWidget {
                     spot.bestTime != null
                         ? 'Best view in ${spot.city} · ${spot.bestTime}'
                         : 'Best view in ${spot.city}',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
                     style: const TextStyle(
-                        color: AppColors.textSecondary, fontSize: 12.5, fontFamily: 'Inter'),
+                      color: AppColors.textSecondary,
+                      fontSize: 11.5,
+                      fontFamily: 'Inter',
+                    ),
                   ),
                 ],
               ),
             ),
-            GestureDetector(
-              onTap: () {
-                context.read<AppState>().toggleSave(spot);
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(
-                    content: Text(
-                        saved ? 'Removed from Saved' : 'Saved to your list'),
-                    duration: const Duration(seconds: 1),
-                  ),
-                );
-              },
-              child: Icon(
-                saved ? Icons.bookmark_rounded : Icons.bookmark_outline_rounded,
-                color: saved ? AppColors.star : AppColors.textSecondary,
-                size: 22,
+            Semantics(
+              button: true,
+              label: saved ? 'Remove from saved' : 'Save spot',
+              child: IconButton(
+                onPressed: () => toggleSaveWithFeedback(context, spot),
+                tooltip: saved ? 'Remove from saved' : 'Save spot',
+                constraints: const BoxConstraints(
+                  minWidth: AppLayout.minTapTarget,
+                  minHeight: AppLayout.minTapTarget,
+                ),
+                icon: Icon(
+                  saved
+                      ? Icons.bookmark_rounded
+                      : Icons.bookmark_outline_rounded,
+                  color: saved ? AppColors.star : AppColors.textSecondary,
+                  size: 21,
+                ),
               ),
             ),
           ],

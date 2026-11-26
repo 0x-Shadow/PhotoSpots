@@ -5,10 +5,12 @@ import '../models/spot.dart';
 import '../state/app_state.dart';
 import '../theme/app_animations.dart';
 import '../theme/app_theme.dart';
-import '../widgets/place_card.dart';
-import 'spot_detail_screen.dart';
+import '../utils/actions.dart';
+import '../utils/format.dart';
+import '../widgets/saved_row.dart';
+import '../widgets/state_views.dart';
 
-/// Saved: rows in the reference style (photo + title + chevron) with staggered reveal.
+/// Saved spots in the reference list style, with sorting and swipe removal.
 class SavedScreen extends StatefulWidget {
   const SavedScreen({super.key});
 
@@ -17,178 +19,129 @@ class SavedScreen extends StatefulWidget {
 }
 
 class _SavedScreenState extends State<SavedScreen> {
+  bool _sortAlphabetically = false;
+
   @override
   Widget build(BuildContext context) {
     final state = context.watch<AppState>();
-    final saved = state.savedSpots;
+    final saved = [...state.savedSpots];
+    if (_sortAlphabetically) {
+      saved.sort((a, b) => a.title.compareTo(b.title));
+    }
 
     return Scaffold(
       body: SafeArea(
-        child: ListView(
-          padding: const EdgeInsets.fromLTRB(20, 12, 20, 120),
-          children: [
-            const SizedBox(height: 8),
-            const Text(
-              'Saved',
-              style: TextStyle(
-                color: AppColors.textPrimary,
-                fontSize: 28,
-                fontWeight: FontWeight.w800,
-                letterSpacing: -0.9,
-                fontFamily: 'Inter',
-              ),
-            ),
-            const SizedBox(height: 4),
-            const Text(
-              'Your favorite places.',
-              style: TextStyle(color: AppColors.textSecondary, fontSize: 15, fontFamily: 'Inter'),
-            ),
-            const SizedBox(height: 24),
-            if (saved.isEmpty) ...[
-              const SizedBox(height: 60),
-              Center(
-                child: Column(
-                  children: [
-                    Container(
-                      padding: const EdgeInsets.all(22),
-                      decoration: BoxDecoration(
-                        color: AppColors.surfaceElevated,
-                        shape: BoxShape.circle,
-                        border: Border.all(color: AppColors.accentSoft),
+        child: ResponsiveBody(
+          child: ListView(
+            padding: const EdgeInsets.fromLTRB(20, 12, 20, 120),
+            children: [
+              const SizedBox(height: 6),
+              Row(
+                children: [
+                  const Expanded(
+                    child: Text(
+                      'Saved',
+                      style: TextStyle(
+                        color: AppColors.textPrimary,
+                        fontSize: 28,
+                        fontWeight: FontWeight.w800,
+                        letterSpacing: -0.9,
+                        fontFamily: 'Inter',
                       ),
-                      child: const Icon(Icons.bookmark_border_rounded,
-                          size: 44, color: AppColors.accent),
                     ),
-                    const SizedBox(height: 16),
-                    Text(
-                      'Nothing saved yet',
-                      style: const TextStyle(
-                          color: AppColors.textPrimary,
-                          fontSize: 18,
-                          fontWeight: FontWeight.w700,
-                          fontFamily: 'Inter'),
+                  ),
+                  PressButton(
+                    semanticLabel: _sortAlphabetically
+                        ? 'Sort by recently saved'
+                        : 'Sort alphabetically',
+                    onTap: () => setState(
+                      () => _sortAlphabetically = !_sortAlphabetically,
                     ),
-                    const SizedBox(height: 6),
-                    Text(
-                      'Tap the bookmark on any spot to save it here.',
-                      style: const TextStyle(color: AppColors.textSecondary),
-                      textAlign: TextAlign.center,
+                    child: Container(
+                      width: 44,
+                      height: 44,
+                      decoration: BoxDecoration(
+                        color: const Color(0x14FFFFFF),
+                        shape: BoxShape.circle,
+                        border: Border.all(color: AppColors.hairline),
+                      ),
+                      child: Icon(
+                        _sortAlphabetically
+                            ? Icons.schedule_rounded
+                            : Icons.sort_by_alpha_rounded,
+                        color: AppColors.textPrimary,
+                        size: 20,
+                      ),
                     ),
-                  ],
+                  ),
+                ],
+              ),
+              const SizedBox(height: 3),
+              const Text(
+                'Your favorite places.',
+                style: TextStyle(
+                  color: AppColors.textSecondary,
+                  fontSize: 14,
+                  fontFamily: 'Inter',
                 ),
               ),
-            ] else ...[
-              for (int i = 0; i < saved.length; i++) ...[
-                RevealItem(
-                  index: i,
-                  total: saved.length,
-                  child: SavedRow(spot: saved[i]),
-                ),
-                const SizedBox(height: 10),
-              ],
+              const SizedBox(height: 22),
+              if (saved.isEmpty)
+                const Padding(
+                  padding: EdgeInsets.symmetric(vertical: 48),
+                  child: EmptyState(
+                    icon: Icons.bookmark_border_rounded,
+                    title: 'Nothing saved yet',
+                    message:
+                        'Tap the bookmark on any spot and it will show up here.',
+                  ),
+                )
+              else
+                for (var i = 0; i < saved.length; i++) ...[
+                  RevealItem(
+                    index: i,
+                    total: saved.length,
+                    child: _RemovableRow(spot: saved[i]),
+                  ),
+                  const SizedBox(height: 10),
+                ],
             ],
-          ],
+          ),
         ),
       ),
     );
   }
 }
 
-/// Saved row: thumbnail + title + meta — reference's list style.
-class SavedRow extends StatelessWidget {
-  const SavedRow({super.key, required this.spot});
+class _RemovableRow extends StatelessWidget {
+  const _RemovableRow({required this.spot});
 
   final Spot spot;
 
   @override
   Widget build(BuildContext context) {
-    final saved = context.watch<AppState>().isSaved(spot.id);
-    return PressButton(
-      child: Container(
-        height: 86,
-        clipBehavior: Clip.antiAlias,
+    final state = context.watch<AppState>();
+    return Dismissible(
+      key: ValueKey('saved-${spot.id}'),
+      direction: DismissDirection.endToStart,
+      background: Container(
+        alignment: Alignment.centerRight,
+        padding: const EdgeInsets.only(right: 22),
         decoration: BoxDecoration(
-          color: AppColors.surfaceElevated,
+          color: AppColors.danger.withValues(alpha: 0.16),
           borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: AppColors.hairline),
         ),
-        child: Row(
-          children: [
-            ClipRRect(
-              borderRadius: BorderRadius.circular(12),
-              child: Image.network(
-                spot.coverUrl,
-                width: 74,
-                height: 74,
-                fit: BoxFit.cover,
-                errorBuilder: (_, _, _) => Container(
-                  width: 74,
-                  height: 74,
-                  color: AppColors.surface,
-                  child: const Icon(Icons.landscape_rounded,
-                      color: AppColors.textFaint),
-                ),
-              ),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(
-                    spot.title,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                      color: AppColors.textPrimary,
-                      fontSize: 15.5,
-                      fontWeight: FontWeight.w800,
-                      letterSpacing: -0.3,
-                      fontFamily: 'Inter',
-                    ),
-                  ),
-                  const SizedBox(height: 3),
-                  Row(
-                    children: [
-                      const Icon(Icons.star_rounded,
-                          color: AppColors.star, size: 13),
-                      const SizedBox(width: 3),
-                      Text(
-                        spot.rating.toStringAsFixed(1),
-                        style: const TextStyle(
-                          color: AppColors.textPrimary,
-                          fontSize: 12.5,
-                          fontWeight: FontWeight.w700,
-                          fontFamily: 'Inter',
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      const Icon(Icons.place_rounded,
-                          color: AppColors.textFaint, size: 13),
-                      const SizedBox(width: 3),
-                      Text(
-                        spot.city,
-                        style: const TextStyle(
-                            color: AppColors.textSecondary, fontSize: 12.5, fontFamily: 'Inter'),
-                      ),
-                    ],
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(width: 10),
-            Icon(Icons.chevron_right_rounded,
-                color: AppColors.textFaint, size: 20),
-          ],
-        ),
+        child: const Icon(Icons.bookmark_remove_rounded,
+            color: AppColors.danger, size: 22),
       ),
-      onTap: () {
-        context.read<AppState>().recordView(spot);
-        Navigator.of(context).push(
-          MaterialPageRoute(builder: (_) => SpotDetailScreen(spotId: spot.id)),
-        );
-      },
+      onDismissed: (_) => toggleSaveWithFeedback(context, spot),
+      child: SavedRow(
+        spot: spot,
+        heroTag: 'saved-${spot.id}',
+        distanceKm: state.hasUserLocation
+            ? state.distanceKm(state.referenceLocation, spot)
+            : null,
+      ),
     );
   }
 }
