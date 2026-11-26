@@ -16,6 +16,18 @@ class AppInfo {
 
   static const githubRepo = '0x-Shadow/PhotoSpots';
 
+  // ---- Backend ----
+  // Both are supplied at build time. Empty values put the app into demo mode,
+  // where spots live in memory and nothing is shared with other devices.
+  static const supabaseUrl =
+      String.fromEnvironment('SUPABASE_URL', defaultValue: '');
+  static const supabaseAnonKey =
+      String.fromEnvironment('SUPABASE_ANON_KEY', defaultValue: '');
+
+  /// Whether uploads can be stored and shared with other users.
+  static bool get backendConfigured =>
+      supabaseUrl.isNotEmpty && supabaseAnonKey.isNotEmpty;
+
   /// Shown on the profile until real accounts exist.
   static const handle = '0x-Shadow';
 

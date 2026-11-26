@@ -7,6 +7,7 @@ import 'package:latlong2/latlong.dart';
 import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import '../app_info.dart';
 import '../data/spot_repository.dart';
 import '../state/app_state.dart';
 import '../theme/app_animations.dart';
@@ -1148,9 +1149,12 @@ class _ReviewStep extends StatelessWidget {
           ),
         ],
         const SizedBox(height: 18),
-        const Text(
-          'Your spot will appear on the map for everyone to discover.',
-          style: TextStyle(
+        Text(
+          AppInfo.backendConfigured
+              ? 'Your spot will appear on the map for everyone to discover.'
+              : 'Demo mode: this spot is kept in memory and resets when the app '
+                  'closes, because no backend is configured.',
+          style: const TextStyle(
             color: AppColors.textFaint,
             fontSize: 12,
             height: 1.45,
@@ -1158,9 +1162,11 @@ class _ReviewStep extends StatelessWidget {
           ),
         ),
         const SizedBox(height: 6),
-        const Text(
-          'The photo is stored with the spot.',
-          style: TextStyle(
+        Text(
+          AppInfo.backendConfigured
+              ? 'The photo is uploaded with the spot.'
+              : 'The photo is not uploaded anywhere in demo mode.',
+          style: const TextStyle(
             color: AppColors.textFaint,
             fontSize: 11.5,
             fontFamily: 'Inter',

@@ -93,12 +93,19 @@ jobs:
         env:
           VERSION: ${{ steps.version.outputs.version }}
           BUILD_NUMBER: ${{ github.run_number }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
         run: |
+          if [[ -z "$SUPABASE_URL" || -z "$SUPABASE_ANON_KEY" ]]; then
+            echo "::warning::SUPABASE_URL / SUPABASE_ANON_KEY are not set; this build ships in demo mode (uploads are not shared)."
+          fi
           flutter pub get
           flutter build apk --release \
             --build-name="$VERSION" \
             --build-number="$BUILD_NUMBER" \
-            --dart-define=APP_VERSION="$VERSION"
+            --dart-define=APP_VERSION="$VERSION" \
+            --dart-define=SUPABASE_URL="$SUPABASE_URL" \
+            --dart-define=SUPABASE_ANON_KEY="$SUPABASE_ANON_KEY"
 
       - name: Rename APK
         id: apk

@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import 'app_info.dart';
 import 'data/spot_repository.dart';
 import 'data/supabase_repository.dart';
 import 'screens/root_shell.dart';
@@ -12,23 +13,16 @@ import 'state/settings_state.dart';
 import 'theme/app_theme.dart';
 import 'widgets/update_gate.dart';
 
-// ---- Supabase configuration ----
-// Create a free project at https://supabase.com, then build with:
-//   --dart-define=SUPABASE_URL=... --dart-define=SUPABASE_ANON_KEY=...
-const _supabaseUrl = String.fromEnvironment('SUPABASE_URL', defaultValue: '');
-const _supabaseAnonKey =
-    String.fromEnvironment('SUPABASE_ANON_KEY', defaultValue: '');
-
-bool get _useSupabase =>
-    _supabaseUrl.isNotEmpty && _supabaseAnonKey.isNotEmpty;
+// Backend configuration lives in AppInfo; both values are supplied at build
+// time with --dart-define. Without them the app runs in demo mode.
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  if (_useSupabase) {
+  if (AppInfo.backendConfigured) {
     await Supabase.initialize(
-      url: _supabaseUrl,
-      publishableKey: _supabaseAnonKey,
+      url: AppInfo.supabaseUrl,
+      publishableKey: AppInfo.supabaseAnonKey,
     );
   }
 
@@ -49,7 +43,7 @@ class _PhotoSpotAppState extends State<PhotoSpotApp> {
   void initState() {
     super.initState();
     _repository =
-        _useSupabase ? SupabaseSpotRepository() : MockSpotRepository();
+        AppInfo.backendConfigured ? SupabaseSpotRepository() : MockSpotRepository();
   }
 
   @override
