@@ -70,7 +70,6 @@ class ProfileScreen extends StatelessWidget {
                         fontSize: 20,
                         fontWeight: FontWeight.w800,
                         letterSpacing: -0.5,
-                        fontFamily: 'Inter',
                       ),
                     ),
                     const SizedBox(height: 3),
@@ -79,7 +78,6 @@ class ProfileScreen extends StatelessWidget {
                       style: const TextStyle(
                         color: AppColors.textSecondary,
                         fontSize: 12.5,
-                        fontFamily: 'Inter',
                       ),
                     ),
                   ],
@@ -114,7 +112,6 @@ class ProfileScreen extends StatelessWidget {
                   style: const TextStyle(
                     color: AppColors.textFaint,
                     fontSize: 11.5,
-                    fontFamily: 'Inter',
                   ),
                 ),
               ),
@@ -144,7 +141,6 @@ class _Stat extends StatelessWidget {
               fontSize: 19,
               fontWeight: FontWeight.w800,
               letterSpacing: -0.5,
-              fontFamily: 'Inter',
             ),
           ),
           const SizedBox(height: 3),
@@ -153,7 +149,6 @@ class _Stat extends StatelessWidget {
             style: const TextStyle(
               color: AppColors.textSecondary,
               fontSize: 11.5,
-              fontFamily: 'Inter',
             ),
           ),
         ],
@@ -199,7 +194,6 @@ class _RowTile extends StatelessWidget {
                     color: AppColors.textPrimary,
                     fontSize: 14,
                     fontWeight: FontWeight.w600,
-                    fontFamily: 'Inter',
                   ),
                 ),
               ),

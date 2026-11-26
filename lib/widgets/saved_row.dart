@@ -72,7 +72,6 @@ class SavedRow extends StatelessWidget {
                           fontSize: 15.5,
                           fontWeight: FontWeight.w800,
                           letterSpacing: -0.3,
-                          fontFamily: 'Inter',
                         ),
                       ),
                       const SizedBox(height: 4),
@@ -87,7 +86,6 @@ class SavedRow extends StatelessWidget {
                               color: AppColors.textPrimary,
                               fontSize: 12.5,
                               fontWeight: FontWeight.w700,
-                              fontFamily: 'Inter',
                             ),
                           ),
                           const SizedBox(width: 8),
@@ -103,7 +101,6 @@ class SavedRow extends StatelessWidget {
                                 style: const TextStyle(
                                   color: AppColors.textSecondary,
                                   fontSize: 12.5,
-                                  fontFamily: 'Inter',
                                 ),
                               ),
                             ),
@@ -119,7 +116,6 @@ class SavedRow extends StatelessWidget {
                                 style: const TextStyle(
                                   color: AppColors.textSecondary,
                                   fontSize: 12.5,
-                                  fontFamily: 'Inter',
                                 ),
                               ),
                             ),

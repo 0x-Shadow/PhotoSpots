@@ -221,7 +221,6 @@ class _MapScreenState extends State<MapScreen> {
               label,
               style: TextStyle(
                 color: active ? AppColors.textPrimary : AppColors.textSecondary,
-                fontFamily: 'Inter',
                 fontWeight: active ? FontWeight.w800 : FontWeight.w600,
               ),
             ),
@@ -245,7 +244,6 @@ class _MapScreenState extends State<MapScreen> {
                       color: AppColors.textPrimary,
                       fontSize: 16,
                       fontWeight: FontWeight.w800,
-                      fontFamily: 'Inter',
                     ),
                   ),
                 ),
@@ -371,7 +369,6 @@ class _MapScreenState extends State<MapScreen> {
                       onChanged: (value) => setState(() => _query = value),
                       style: const TextStyle(
                         color: AppColors.textPrimary,
-                        fontFamily: 'Inter',
                         fontSize: 14.5,
                       ),
                       decoration: InputDecoration(
@@ -531,7 +528,6 @@ class _MapScreenState extends State<MapScreen> {
                             fontWeight: active
                                 ? FontWeight.w800
                                 : FontWeight.w600,
-                            fontFamily: 'Inter',
                           ),
                         ),
                       ),
@@ -631,7 +627,6 @@ class _MapScreenState extends State<MapScreen> {
                   style: TextStyle(
                     color: AppColors.textSecondary,
                     fontSize: 12.5,
-                    fontFamily: 'Inter',
                   ),
                 ),
               ),
@@ -854,7 +849,6 @@ class _PlaceCard extends StatelessWidget {
                       fontSize: 15,
                       fontWeight: FontWeight.w800,
                       letterSpacing: -0.3,
-                      fontFamily: 'Inter',
                     ),
                   ),
                   const SizedBox(height: 5),
@@ -872,7 +866,6 @@ class _PlaceCard extends StatelessWidget {
                           color: AppColors.textPrimary,
                           fontSize: 12.5,
                           fontWeight: FontWeight.w800,
-                          fontFamily: 'Inter',
                         ),
                       ),
                       Text(
@@ -880,7 +873,6 @@ class _PlaceCard extends StatelessWidget {
                         style: const TextStyle(
                           color: AppColors.textFaint,
                           fontSize: 12,
-                          fontFamily: 'Inter',
                         ),
                       ),
                       const SizedBox(width: 8),
@@ -900,7 +892,6 @@ class _PlaceCard extends StatelessWidget {
                           style: const TextStyle(
                             color: AppColors.textFaint,
                             fontSize: 12,
-                            fontFamily: 'Inter',
                           ),
                         ),
                       ),
@@ -916,7 +907,6 @@ class _PlaceCard extends StatelessWidget {
                     style: const TextStyle(
                       color: AppColors.textSecondary,
                       fontSize: 11.5,
-                      fontFamily: 'Inter',
                     ),
                   ),
                 ],
