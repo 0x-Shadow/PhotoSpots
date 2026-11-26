@@ -202,6 +202,8 @@ create trigger on_view_insert
 -- ---------------------------------------------------------------------------
 -- Indexes
 -- ---------------------------------------------------------------------------
+-- One row per place, so re-running the seed below cannot duplicate spots.
+create unique index if not exists spots_title_city_key on spots (title, city);
 create index if not exists spots_tags_idx on spots using gin (tags);
 create index if not exists spots_created_at_idx on spots (created_at desc);
 create index if not exists photos_spot_id_idx on photos (spot_id);
@@ -218,8 +220,18 @@ create policy "Public photo reads"
 
 drop policy if exists "Authenticated photo uploads" on storage.objects;
 create policy "Authenticated photo uploads"
-  on storage.objects for insert
-  with check ( bucket_id = 'photos' and auth.role() = 'authenticated' );
+  on storage.objects for insert to authenticated
+  with check ( bucket_id = 'photos' );
+
+drop policy if exists "Photo owners can update" on storage.objects;
+create policy "Photo owners can update"
+  on storage.objects for update to authenticated
+  using ( bucket_id = 'photos' and owner = auth.uid() );
+
+drop policy if exists "Photo owners can delete" on storage.objects;
+create policy "Photo owners can delete"
+  on storage.objects for delete to authenticated
+  using ( bucket_id = 'photos' and owner = auth.uid() );
 
 -- ---------------------------------------------------------------------------
 -- Seed: Lisbon photo spots
@@ -239,4 +251,28 @@ values
   ('Rua Augusta Arch', 'Perfect one-point perspective down Rua Augusta. Tripod recommended after dark.', 'Lisbon', 38.7101, -9.1394, ARRAY['architecture','symmetry','date'], 'Blue hour', 4.6, 6100, 88, 790),
   ('Elevador de Santa Justa', 'Gothic iron lift against the rooftops. Shoot from the upper terrace, not the street below.', 'Lisbon', 38.7121, -9.1390, ARRAY['architecture','iron','friends'], 'Blue hour', 4.4, 4900, 74, 640),
   ('Graça Rooftop Ledge', 'A quiet residential ledge most tourists walk past. Full river view with no one behind you.', 'Lisbon', 38.7185, -9.1347, ARRAY['skyline','hidden gem','date'], 'Golden hour', 4.9, 1200, 58, 430),
-  ('Cais das Colunas', 'Two marble columns walking into the Tagus. Reflections pool around your feet at high tide.', 'Lisbon', 38.7066, -9.1440, ARRAY['water','reflection','date'], 'Blue hour', 4.7, 3800, 102, 895);
+  ('Cais das Colunas', 'Two marble columns walking into the Tagus. Reflections pool around your feet at high tide.', 'Lisbon', 38.7066, -9.1440, ARRAY['water','reflection','date'], 'Blue hour', 4.7, 3800, 102, 895)
+on conflict (title, city) do nothing;
+
+-- Seed photography, so cards are not empty on a fresh project. The files live
+-- in the public "photos" bucket under seed/.
+insert into photos (spot_id, image_url)
+select s.id,
+       'https://gurlwhjcqcdntuxgfvlk.supabase.co/storage/v1/object/public/photos/seed/'
+         || v.slug || '.jpg'
+from (values
+  ('Miradouro da Senhora do Monte', 'senhora-do-monte'),
+  ('Miradouro de Santa Luzia',      'santa-luzia'),
+  ('Praça do Comércio',             'praca-do-comercio'),
+  ('Belém Tower',                   'belem-tower'),
+  ('LX Factory',                    'lx-factory'),
+  ('Tram 28 at Graça',              'tram-28'),
+  ('Castelo de São Jorge',          'castelo-sao-jorge'),
+  ('Pink Street',                   'pink-street'),
+  ('Rua Augusta Arch',              'rua-augusta'),
+  ('Elevador de Santa Justa',       'santa-justa')
+) as v(title, slug)
+join spots s on s.title = v.title
+where not exists (
+  select 1 from photos p where p.spot_id = s.id and p.image_url like '%/seed/%'
+);

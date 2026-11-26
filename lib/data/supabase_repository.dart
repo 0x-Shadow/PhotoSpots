@@ -18,10 +18,13 @@ class SupabaseSpotRepository implements SpotRepository {
 
   Future<String?>? _sessionFuture;
 
+  /// The profile join must be named explicitly: `spots` and `profiles` are
+  /// linked both by submitted_by and through saves, so an unqualified
+  /// `profiles(...)` embed fails with PGRST201 (ambiguous relationship).
   static const _spotSelect = '''
     *,
     photos (*),
-    profiles (display_name, avatar_url)
+    profiles!spots_submitted_by_fkey (display_name, avatar_url)
   ''';
 
   /// Returns a user id, creating an anonymous session on first write.
