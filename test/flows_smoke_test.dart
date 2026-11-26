@@ -70,7 +70,7 @@ void main() {
     await tester.pump(const Duration(milliseconds: 600));
 
     // Submit flow opens on the photo step.
-    await tester.tap(find.byIcon(Icons.add_rounded).last);
+    await tester.tap(find.bySemanticsLabel('Add a spot'));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 600));
     expect(find.text('Show the spot at its best'), findsOneWidget);

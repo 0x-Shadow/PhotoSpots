@@ -514,7 +514,7 @@ class _MapScreenState extends State<MapScreen> {
           duration: AppMotion.quick,
           curve: AppMotion.easeOut,
           right: 16,
-          bottom: selected != null ? 244 : 132,
+          bottom: selected != null ? 188 : 76,
           child: PressButton(
             semanticLabel: 'Go to my location',
             onTap: _goToMyLocation,
@@ -572,7 +572,7 @@ class _MapScreenState extends State<MapScreen> {
         Positioned(
           left: 0,
           right: 0,
-          bottom: 132,
+          bottom: 76,
           child: Center(
             child: ConstrainedBox(
               constraints: const BoxConstraints(maxWidth: 430),
