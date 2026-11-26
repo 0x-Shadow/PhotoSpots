@@ -57,11 +57,14 @@ jobs:
 
       - name: Build release APK
         shell: bash
+        env:
+          TAG: ${{ steps.version.outputs.tag }}
+          BUILD_NUMBER: ${{ github.run_number }}
         run: |
           flutter pub get
           flutter build apk --release \
             --build-name="${TAG#v}" \
-            --build-number="${{ github.run_number }}"
+            --build-number="$BUILD_NUMBER"
 
       - name: Rename APK
         id: apk
