@@ -66,6 +66,8 @@ jobs:
       - name: Rename APK
         id: apk
         shell: bash
+        env:
+          TAG: ${{ steps.version.outputs.tag }}
         run: |
           OUT="photospot-${TAG#v}.apk"
           cp build/app/outputs/flutter-apk/app-release.apk "$OUT"
