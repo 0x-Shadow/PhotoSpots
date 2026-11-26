@@ -23,6 +23,10 @@ enum _MapSort { nearest, topRated, saved }
 class MapScreen extends StatefulWidget {
   const MapScreen({super.key});
 
+  /// A point requested by another screen (e.g. a spot's mini-map). The map
+  /// consumes it on the next frame and clears it, so it never re-centres twice.
+  static final ValueNotifier<LatLng?> focusRequest = ValueNotifier<LatLng?>(null);
+
   @override
   State<MapScreen> createState() => _MapScreenState();
 }
@@ -44,7 +48,32 @@ class _MapScreenState extends State<MapScreen> {
   String? _preferredUrl;
   String? _fallbackNotice;
   bool _tilesFailed = false;
+  LatLng? _pendingFocus;
   final _tilesKey = GlobalKey<MapTileLayersState>();
+
+  @override
+  void initState() {
+    super.initState();
+    MapScreen.focusRequest.addListener(_onFocusRequested);
+    final requested = MapScreen.focusRequest.value;
+    if (requested != null) {
+      MapScreen.focusRequest.value = null;
+      _pendingFocus = requested;
+    }
+  }
+
+  void _onFocusRequested() {
+    final point = MapScreen.focusRequest.value;
+    if (point == null) return;
+    MapScreen.focusRequest.value = null;
+    setState(() {
+      _pendingFocus = point;
+      _selectedId = null;
+      _filterTag = null;
+      _query = '';
+    });
+    _moveMap(point, 15);
+  }
 
   /// Re-reads the preferred style when Settings changes it, so a style picked
   /// there takes over and any session fallback is dropped.
@@ -122,6 +151,7 @@ class _MapScreenState extends State<MapScreen> {
 
   @override
   void dispose() {
+    MapScreen.focusRequest.removeListener(_onFocusRequested);
     _searchController.dispose();
     _mapController.dispose();
     super.dispose();
@@ -273,7 +303,11 @@ class _MapScreenState extends State<MapScreen> {
               ),
               onMapReady: () {
                 setState(() => _mapReady = true);
-                if (state.hasUserLocation) {
+                final focus = _pendingFocus;
+                if (focus != null) {
+                  _pendingFocus = null;
+                  _moveMap(focus, 15);
+                } else if (state.hasUserLocation) {
                   _lastCenteredLocation = state.referenceLocation;
                   _moveMap(state.referenceLocation, 13.5);
                 }

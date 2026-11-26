@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 
 import 'app_animations.dart';
 
-/// "findr." reference world — near-black ground, raised dark cards,
+/// PhotoSpot's visual world — near-black ground, raised dark cards,
 /// pure white type, hairline borders, white pill actions.
 class AppColors {
   AppColors._();

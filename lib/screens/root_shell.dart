@@ -1,6 +1,7 @@
 import 'dart:ui' show ImageFilter;
 
 import 'package:flutter/material.dart';
+import 'package:latlong2/latlong.dart';
 import 'package:provider/provider.dart';
 
 import '../state/app_state.dart';
@@ -16,6 +17,16 @@ import 'submit_screen.dart';
 
 class RootShell extends StatefulWidget {
   const RootShell({super.key});
+
+  /// Lets a deep link (e.g. a spot's mini-map) switch tabs and focus the map.
+  static void Function(int slot)? _tabOpener;
+
+  static void openTab(int slot) => _tabOpener?.call(slot);
+
+  static void openMapAt(LatLng point) {
+    MapScreen.focusRequest.value = point;
+    openTab(1);
+  }
 
   @override
   State<RootShell> createState() => _RootShellState();
@@ -55,6 +66,7 @@ class _RootShellState extends State<RootShell>
       curve: AppMotion.easeOut,
     );
     _tabScale = Tween<double>(begin: 0.98, end: 1.0).animate(_tabFade);
+    RootShell._tabOpener = _selectSlot;
   }
 
   void _openSubmit() {
@@ -90,6 +102,7 @@ class _RootShellState extends State<RootShell>
   @override
   void dispose() {
     _tabController.dispose();
+    if (RootShell._tabOpener == _selectSlot) RootShell._tabOpener = null;
     super.dispose();
   }
 
