@@ -46,7 +46,6 @@ class _SavedScreenState extends State<SavedScreen> {
                         fontSize: 28,
                         fontWeight: FontWeight.w800,
                         letterSpacing: -0.9,
-                        fontFamily: 'Inter',
                       ),
                     ),
                   ),
@@ -82,7 +81,6 @@ class _SavedScreenState extends State<SavedScreen> {
                 style: TextStyle(
                   color: AppColors.textSecondary,
                   fontSize: 14,
-                  fontFamily: 'Inter',
                 ),
               ),
               const SizedBox(height: 22),

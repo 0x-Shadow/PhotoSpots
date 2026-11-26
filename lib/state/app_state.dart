@@ -5,12 +5,16 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../data/spot_repository.dart';
 import '../models/spot.dart';
+import 'location_outcome.dart';
 
 /// Central app state: spots, saves, ranking, submission, and location.
 class AppState extends ChangeNotifier {
   AppState(this._repo);
 
   static const savedIdsKey = 'saved_spot_ids';
+  static const lastLatKey = 'last_lat';
+  static const lastLngKey = 'last_lng';
+  static const lastFixAtKey = 'last_fix_at';
 
   /// Lisbon — where the seed data lives. Used as the reference point until a
   /// real location fix arrives.
@@ -27,8 +31,9 @@ class AppState extends ChangeNotifier {
   bool _loading = true;
   Object? _error;
   Position? _userLocation;
+  LatLng? _cachedFix;
   bool _locationLoading = false;
-  String? _locationError;
+  LocationOutcome? _lastOutcome;
   bool _disposed = false;
 
   bool get loading => _loading;
@@ -38,15 +43,26 @@ class AppState extends ChangeNotifier {
   Position? get userLocation => _userLocation;
   bool get hasUserLocation => _userLocation != null;
   bool get locationLoading => _locationLoading;
-  String? get locationError => _locationError;
+
+  /// The most recent result of [requestLocation], for UIs that need to show
+  /// a recovery action.
+  LocationOutcome? get lastLocationOutcome => _lastOutcome;
+
+  /// True once a fix — live or from a previous launch — is known.
+  bool get hasCachedFix => _cachedFix != null;
+
+  /// True when distances can be measured from a real position rather than the
+  /// demo seed.
+  bool get hasReferenceFix => _userLocation != null || _cachedFix != null;
 
   /// Spots opened this session, used for the profile "Visited" stat.
   int get viewedCount => _viewedIds.length;
 
-  /// Where distance labels are measured from.
+  /// Where distance labels are measured from: a live fix, then the fix from
+  /// an earlier launch, and only then the demo city.
   LatLng get referenceLocation => _userLocation != null
       ? LatLng(_userLocation!.latitude, _userLocation!.longitude)
-      : fallbackCenter;
+      : (_cachedFix ?? fallbackCenter);
 
   List<Spot> get savedSpots =>
       _spots.where((spot) => _savedIds.contains(spot.id)).toList();
@@ -90,6 +106,7 @@ class AppState extends ChangeNotifier {
     try {
       final spots = await _repo.fetchSpots();
       final local = await _readSavedIds();
+      await _readCachedFix();
 
       Set<String>? remote;
       try {
@@ -210,19 +227,18 @@ class AppState extends ChangeNotifier {
     return spot;
   }
 
-  /// Requests a location fix. Returns true when [userLocation] is fresh.
-  Future<bool> requestLocation() async {
-    if (_locationLoading) return _userLocation != null;
+  /// Requests a location fix and reports exactly what happened, so callers
+  /// can offer the right recovery action instead of a dead-end message.
+  Future<LocationOutcome> requestLocation() async {
+    if (_locationLoading) return _lastOutcome ?? LocationOutcome.failed;
 
     _locationLoading = true;
-    _locationError = null;
     _notify();
 
     try {
       final servicesEnabled = await Geolocator.isLocationServiceEnabled();
       if (!servicesEnabled) {
-        _locationError = 'Location services are turned off.';
-        return false;
+        return _lastOutcome = LocationOutcome.servicesOff;
       }
 
       var permission = await Geolocator.checkPermission();
@@ -230,12 +246,13 @@ class AppState extends ChangeNotifier {
         permission = await Geolocator.requestPermission();
       }
 
-      if (permission == LocationPermission.denied ||
-          permission == LocationPermission.deniedForever) {
-        _locationError = permission == LocationPermission.deniedForever
-            ? 'Location is blocked. Enable it in system settings.'
-            : 'Location permission was denied.';
-        return false;
+      final outcome = classifyLocation(
+        servicesEnabled: servicesEnabled,
+        deniedForever: permission == LocationPermission.deniedForever,
+        denied: permission == LocationPermission.denied,
+      );
+      if (outcome != LocationOutcome.granted) {
+        return _lastOutcome = outcome;
       }
 
       final position = await Geolocator.getCurrentPosition(
@@ -245,13 +262,62 @@ class AppState extends ChangeNotifier {
         ),
       );
       _userLocation = position;
-      return true;
+      await cacheFix(position.latitude, position.longitude);
+      return _lastOutcome = LocationOutcome.granted;
     } catch (_) {
-      _locationError = 'Could not get your location right now.';
-      return false;
+      return _lastOutcome = LocationOutcome.failed;
     } finally {
       _locationLoading = false;
       _notify();
+    }
+  }
+
+  /// Called when the app returns from the background. If the user granted
+  /// permission in system settings, pick up the fix without asking again.
+  void onAppResumed() {
+    if (_locationLoading || hasUserLocation) return;
+    Geolocator.checkPermission().then((permission) {
+      if (permission == LocationPermission.always ||
+          permission == LocationPermission.whileInUse) {
+        requestLocation();
+      }
+    }).catchError((_) {
+      // A failed recheck is invisible; the user can still tap the location
+      // button, which runs the full recovery flow.
+    });
+  }
+
+  /// Remembers the last good fix so the next launch can sort distances from
+  /// the user's own city instead of the demo seed.
+  Future<void> cacheFix(double lat, double lng) async {
+    _cachedFix = LatLng(lat, lng);
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setDouble(lastLatKey, lat);
+      await prefs.setDouble(lastLngKey, lng);
+      await prefs.setDouble(
+        lastFixAtKey,
+        DateTime.now().millisecondsSinceEpoch.toDouble(),
+      );
+    } catch (_) {
+      // Local persistence is best effort.
+    }
+    _notify();
+  }
+
+  /// Adopts a fresh live fix as both the current position and the cached one.
+  Future<void> adoptLiveFix(double lat, double lng) async {
+    await cacheFix(lat, lng);
+  }
+
+  Future<void> _readCachedFix() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final lat = prefs.getDouble(lastLatKey);
+      final lng = prefs.getDouble(lastLngKey);
+      if (lat != null && lng != null) _cachedFix = LatLng(lat, lng);
+    } catch (_) {
+      // No cache is the normal first-run state.
     }
   }
 

@@ -88,7 +88,6 @@ class _SearchScreenState extends State<SearchScreen> {
                         textInputAction: TextInputAction.search,
                         style: const TextStyle(
                           color: AppColors.textPrimary,
-                          fontFamily: 'Inter',
                           fontSize: 15,
                         ),
                         onChanged: (value) => setState(() => _query = value),
@@ -153,7 +152,6 @@ class _SearchScreenState extends State<SearchScreen> {
                                     style: const TextStyle(
                                       color: AppColors.textSecondary,
                                       fontSize: 12.5,
-                                      fontFamily: 'Inter',
                                     ),
                                   ),
                                 );
@@ -207,7 +205,6 @@ class _Suggestions extends StatelessWidget {
             color: AppColors.textPrimary,
             fontSize: 16,
             fontWeight: FontWeight.w800,
-            fontFamily: 'Inter',
             letterSpacing: -0.3,
           ),
         ),
@@ -217,7 +214,6 @@ class _Suggestions extends StatelessWidget {
           style: TextStyle(
             color: AppColors.textSecondary,
             fontSize: 13,
-            fontFamily: 'Inter',
           ),
         ),
         const SizedBox(height: 16),
@@ -244,7 +240,6 @@ class _Suggestions extends StatelessWidget {
                     style: const TextStyle(
                       color: AppColors.textSecondary,
                       fontSize: 13,
-                      fontFamily: 'Inter',
                       fontWeight: FontWeight.w600,
                     ),
                   ),

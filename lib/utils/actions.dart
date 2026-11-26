@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher.dart';
 
@@ -53,26 +52,3 @@ Future<void> openDirections(BuildContext context, Spot spot) async {
   }
 }
 
-/// Copies a map link for the spot to the clipboard.
-Future<void> shareSpot(BuildContext context, Spot spot) async {
-  final messenger = ScaffoldMessenger.maybeOf(context);
-  final uri = mapLinkUri(spot.location.latitude, spot.location.longitude);
-
-  final label = StringBuffer(spot.title);
-  if (spot.city.isNotEmpty) label.write(' · ${spot.city}');
-  label.write('\n$uri');
-
-  try {
-    await Clipboard.setData(ClipboardData(text: label.toString()));
-    messenger?.showSnackBar(
-      const SnackBar(
-        content: Text('Spot link copied to clipboard'),
-        duration: Duration(seconds: 2),
-      ),
-    );
-  } catch (_) {
-    messenger?.showSnackBar(
-      SnackBar(content: SelectableText(uri.toString())),
-    );
-  }
-}

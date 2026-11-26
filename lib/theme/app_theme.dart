@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 
-/// "findr." reference world — near-black ground, raised dark cards,
+import 'app_animations.dart';
+
+/// PhotoSpot's visual world — near-black ground, raised dark cards,
 /// pure white type, hairline borders, white pill actions.
 class AppColors {
   AppColors._();
@@ -17,8 +19,8 @@ class AppColors {
 
   static const action = Color(0xFFFFFFFF);
   static const onAction = Color(0xFF0A0A0B);
-  static const accent = Color(0xFFFFA94D);
-  static const accentSoft = Color(0x33FFA94D);
+  static const accent = Color(0xFF0A84FF);
+  static const accentSoft = Color(0x1F0A84FF);
 
   static const star = Color(0xFFFFB84D);
   static const trending = Color(0xFFFF6B4A);
@@ -132,11 +134,12 @@ class AppTheme {
       ),
       pageTransitionsTheme: PageTransitionsTheme(
         builders: {
-          TargetPlatform.android: const FadeUpwardsPageTransitionsBuilder(),
-          TargetPlatform.iOS: const FadeUpwardsPageTransitionsBuilder(),
-          TargetPlatform.macOS: const FadeUpwardsPageTransitionsBuilder(),
-          TargetPlatform.windows: const FadeUpwardsPageTransitionsBuilder(),
-          TargetPlatform.linux: const FadeUpwardsPageTransitionsBuilder(),
+          TargetPlatform.android: const AppPageTransitionsBuilder(),
+          TargetPlatform.iOS: const AppPageTransitionsBuilder(),
+          TargetPlatform.macOS: const AppPageTransitionsBuilder(),
+          TargetPlatform.windows: const AppPageTransitionsBuilder(),
+          TargetPlatform.linux: const AppPageTransitionsBuilder(),
+          TargetPlatform.fuchsia: const AppPageTransitionsBuilder(),
         },
       ),
     );
@@ -144,6 +147,14 @@ class AppTheme {
 
   static TextTheme _textTheme(TextTheme base) {
     return base.copyWith(
+      displaySmall: const TextStyle(
+        fontFamily: 'Inter',
+        fontSize: 44,
+        height: 1.04,
+        fontWeight: FontWeight.w800,
+        letterSpacing: -1.8,
+        color: AppColors.textPrimary,
+      ),
       headlineMedium: const TextStyle(
         fontFamily: 'Inter',
         fontSize: 34,
@@ -166,6 +177,13 @@ class AppTheme {
         letterSpacing: -0.3,
         color: AppColors.textPrimary,
       ),
+      titleSmall: const TextStyle(
+        fontFamily: 'Inter',
+        fontSize: 14,
+        fontWeight: FontWeight.w700,
+        letterSpacing: -0.2,
+        color: AppColors.textPrimary,
+      ),
       bodyLarge: const TextStyle(
         fontFamily: 'Inter',
         fontSize: 15.5,
@@ -176,6 +194,18 @@ class AppTheme {
         fontFamily: 'Inter',
         fontSize: 14,
         color: AppColors.textSecondary,
+      ),
+      bodySmall: const TextStyle(
+        fontFamily: 'Inter',
+        fontSize: 12.5,
+        height: 1.45,
+        color: AppColors.textSecondary,
+      ),
+      labelMedium: const TextStyle(
+        fontFamily: 'Inter',
+        fontSize: 12,
+        fontWeight: FontWeight.w600,
+        color: AppColors.textPrimary,
       ),
       labelLarge: const TextStyle(
         fontFamily: 'Inter',
@@ -194,3 +224,34 @@ class AppLayout {
   static const pagePad = EdgeInsets.symmetric(horizontal: 20);
   static const minTapTarget = 48.0;
 }
+
+/// The app's one push transition: a small lift and fade, identical on every
+/// platform. Replaces FadeUpwards so navigation reads the same on iOS and
+/// Android.
+class AppPageTransitionsBuilder extends PageTransitionsBuilder {
+  const AppPageTransitionsBuilder();
+
+  @override
+  Widget buildTransitions<T>(
+    PageRoute<T> page,
+    BuildContext context,
+    Animation<double> animation,
+    Animation<double> secondaryAnimation,
+    Widget child,
+  ) {
+    if (MediaQuery.disableAnimationsOf(context)) return child;
+    return FadeTransition(
+      opacity: animation,
+      child: SlideTransition(
+        position: Tween<Offset>(
+          begin: const Offset(0, 0.06),
+          end: Offset.zero,
+        ).animate(
+          CurvedAnimation(parent: animation, curve: AppMotion.easeOut),
+        ),
+        child: child,
+      ),
+    );
+  }
+}
+

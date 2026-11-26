@@ -2,10 +2,12 @@ import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:provider/provider.dart';
-import 'package:url_launcher/url_launcher.dart';
-
 import '../models/spot.dart';
+import '../map/map_tile_layers.dart';
+import '../map/tile_sources.dart';
 import '../state/app_state.dart';
+import '../state/location_outcome.dart';
+import '../widgets/location_prompt.dart';
 import '../state/settings_state.dart';
 import '../theme/app_animations.dart';
 import '../theme/app_theme.dart';
@@ -13,6 +15,7 @@ import '../utils/actions.dart';
 import '../utils/categories.dart';
 import '../utils/format.dart';
 import '../utils/navigation.dart';
+import '../utils/share.dart';
 import '../widgets/spot_image.dart';
 
 enum _MapSort { nearest, topRated, saved }
@@ -20,6 +23,10 @@ enum _MapSort { nearest, topRated, saved }
 /// Map screen — category pins, filters, sorting, and a floating spot card.
 class MapScreen extends StatefulWidget {
   const MapScreen({super.key});
+
+  /// A point requested by another screen (e.g. a spot's mini-map). The map
+  /// consumes it on the next frame and clears it, so it never re-centres twice.
+  static final ValueNotifier<LatLng?> focusRequest = ValueNotifier<LatLng?>(null);
 
   @override
   State<MapScreen> createState() => _MapScreenState();
@@ -35,6 +42,80 @@ class _MapScreenState extends State<MapScreen> {
   _MapSort _sort = _MapSort.nearest;
   bool _mapReady = false;
   LatLng? _lastCenteredLocation;
+
+  /// The basemap actually rendered: the preferred style unless the probe
+  /// found it unusable and the session fell back.
+  MapStyle _activeStyle = TileSources.dark;
+  String? _preferredUrl;
+  String? _fallbackNotice;
+  bool _tilesFailed = false;
+  LatLng? _pendingFocus;
+  final _tilesKey = GlobalKey<MapTileLayersState>();
+
+  @override
+  void initState() {
+    super.initState();
+    MapScreen.focusRequest.addListener(_onFocusRequested);
+    final requested = MapScreen.focusRequest.value;
+    if (requested != null) {
+      MapScreen.focusRequest.value = null;
+      _pendingFocus = requested;
+    }
+  }
+
+  void _onFocusRequested() {
+    final point = MapScreen.focusRequest.value;
+    if (point == null) return;
+    MapScreen.focusRequest.value = null;
+    setState(() {
+      _pendingFocus = point;
+      _selectedId = null;
+      _filterTag = null;
+      _query = '';
+    });
+    _moveMap(point, 15);
+  }
+
+  /// Re-reads the preferred style when Settings changes it, so a style picked
+  /// there takes over and any session fallback is dropped.
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final preferred = context.watch<SettingsState>().activeMapStyle;
+    if (_preferredUrl == null || preferred.urlTemplate != _preferredUrl) {
+      _preferredUrl = preferred.urlTemplate;
+      _activeStyle = preferred;
+      _fallbackNotice = null;
+      _tilesFailed = false;
+    }
+  }
+
+  /// The probe could not use the active style: either fall back to the street
+  /// style or, when that has already failed too, show the failure panel.
+  void _onFallback(String styleId) {
+    final settings = context.read<SettingsState>();
+    setState(() {
+      if (styleId == _activeStyle.id || settings.mapStyle == styleId) {
+        _tilesFailed = true;
+        return;
+      }
+      _activeStyle = TileSources.byId(styleId, cartoApiKey: settings.cartoApiKey);
+      _fallbackNotice = 'Basemap unavailable — using OpenStreetMap.';
+      _tilesFailed = false;
+    });
+  }
+
+  /// Re-probes the preferred style from scratch.
+  void _retryTiles() {
+    final settings = context.read<SettingsState>();
+    setState(() {
+      _activeStyle = settings.activeMapStyle;
+      _preferredUrl = _activeStyle.urlTemplate;
+      _fallbackNotice = null;
+      _tilesFailed = false;
+    });
+    _tilesKey.currentState?.retry();
+  }
 
   /// Moves the camera only once the map has been laid out, so an early tap or
   /// a location fix that arrives during startup cannot throw.
@@ -71,6 +152,7 @@ class _MapScreenState extends State<MapScreen> {
 
   @override
   void dispose() {
+    MapScreen.focusRequest.removeListener(_onFocusRequested);
     _searchController.dispose();
     _mapController.dispose();
     super.dispose();
@@ -109,16 +191,10 @@ class _MapScreenState extends State<MapScreen> {
 
   Future<void> _goToMyLocation() async {
     final state = context.read<AppState>();
-    final messenger = ScaffoldMessenger.of(context);
-    final ok = await state.requestLocation();
+    final outcome = await runLocationFlow(context);
     if (!mounted) return;
 
-    if (!ok || state.userLocation == null) {
-      messenger.showSnackBar(
-        SnackBar(
-          content: Text(state.locationError ?? 'Location is unavailable.'),
-        ),
-      );
+    if (outcome != LocationOutcome.granted || state.userLocation == null) {
       return;
     }
 
@@ -145,7 +221,6 @@ class _MapScreenState extends State<MapScreen> {
               label,
               style: TextStyle(
                 color: active ? AppColors.textPrimary : AppColors.textSecondary,
-                fontFamily: 'Inter',
                 fontWeight: active ? FontWeight.w800 : FontWeight.w600,
               ),
             ),
@@ -169,7 +244,6 @@ class _MapScreenState extends State<MapScreen> {
                       color: AppColors.textPrimary,
                       fontSize: 16,
                       fontWeight: FontWeight.w800,
-                      fontFamily: 'Inter',
                     ),
                   ),
                 ),
@@ -228,7 +302,11 @@ class _MapScreenState extends State<MapScreen> {
               ),
               onMapReady: () {
                 setState(() => _mapReady = true);
-                if (state.hasUserLocation) {
+                final focus = _pendingFocus;
+                if (focus != null) {
+                  _pendingFocus = null;
+                  _moveMap(focus, 15);
+                } else if (state.hasUserLocation) {
                   _lastCenteredLocation = state.referenceLocation;
                   _moveMap(state.referenceLocation, 13.5);
                 }
@@ -239,12 +317,10 @@ class _MapScreenState extends State<MapScreen> {
               },
             ),
             children: [
-              TileLayer(
-                urlTemplate: 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
-                subdomains: const ['a', 'b', 'c', 'd'],
-                userAgentPackageName: 'com.photospot.app',
-                maxZoom: 18,
-                retinaMode: RetinaMode.isHighDensity(context),
+              MapTileLayers(
+                key: _tilesKey,
+                style: _activeStyle,
+                onFallback: _onFallback,
               ),
               MarkerLayer(
                 markers: [
@@ -272,22 +348,7 @@ class _MapScreenState extends State<MapScreen> {
                     ),
                 ],
               ),
-              RichAttributionWidget(
-                alignment: AttributionAlignment.bottomLeft,
-                attributions: [
-                  TextSourceAttribution(
-                    'OpenStreetMap contributors',
-                    onTap: () => launchUrl(
-                      Uri.parse('https://www.openstreetmap.org/copyright'),
-                    ),
-                  ),
-                  TextSourceAttribution(
-                    'CARTO',
-                    onTap: () =>
-                        launchUrl(Uri.parse('https://carto.com/attributions')),
-                  ),
-                ],
-              ),
+              MapAttribution(style: _activeStyle),
             ],
           ),
         ),
@@ -308,7 +369,6 @@ class _MapScreenState extends State<MapScreen> {
                       onChanged: (value) => setState(() => _query = value),
                       style: const TextStyle(
                         color: AppColors.textPrimary,
-                        fontFamily: 'Inter',
                         fontSize: 14.5,
                       ),
                       decoration: InputDecoration(
@@ -369,40 +429,46 @@ class _MapScreenState extends State<MapScreen> {
           ),
         ),
 
-        // A short status moment prevents the map from feeling like an empty,
-        // unresponsive canvas while the first tiles arrive.
+        // One status slot so the loading chip, the fallback notice and the
+        // failure panel can never stack on top of each other.
         Positioned(
           top: 116,
-          left: 0,
-          right: 0,
-          child: IgnorePointer(
-            child: AnimatedOpacity(
-              duration: AppMotion.instant,
-              opacity: _mapReady ? 0 : 1,
-              child: Center(
-                child: Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 12,
-                    vertical: 7,
-                  ),
-                  decoration: BoxDecoration(
-                    color: const Color(0xE61A1A1D),
-                    borderRadius: BorderRadius.circular(999),
-                    border: Border.all(color: AppColors.hairline),
-                  ),
-                  child: const Text(
-                    'Loading your map…',
-                    style: TextStyle(
-                      color: AppColors.textSecondary,
-                      fontFamily: 'Inter',
-                      fontSize: 12,
-                      fontWeight: FontWeight.w600,
+          left: 24,
+          right: 24,
+          child: _tilesFailed
+              ? MapUnavailableView(
+                  styleLabel: _activeStyle.label,
+                  onRetry: _retryTiles,
+                )
+              : _fallbackNotice != null
+              ? _FallbackNotice(
+                  text: _fallbackNotice!,
+                  onDismiss: () => setState(() => _fallbackNotice = null),
+                )
+              : IgnorePointer(
+                  child: AnimatedOpacity(
+                    duration: AppMotion.instant,
+                    opacity: _mapReady ? 0 : 1,
+                    child: Center(
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 7,
+                        ),
+                        decoration: BoxDecoration(
+                          color: const Color(0xE61A1A1D),
+                          borderRadius: BorderRadius.circular(999),
+                          border: Border.all(color: AppColors.hairline),
+                        ),
+                        child: Text(
+                          'Loading your map…',
+                          style: Theme.of(context).textTheme.labelLarge
+                              ?.copyWith(color: AppColors.textSecondary),
+                        ),
+                      ),
                     ),
                   ),
                 ),
-              ),
-            ),
-          ),
         ),
 
         // Filter chips.
@@ -462,7 +528,6 @@ class _MapScreenState extends State<MapScreen> {
                             fontWeight: active
                                 ? FontWeight.w800
                                 : FontWeight.w600,
-                            fontFamily: 'Inter',
                           ),
                         ),
                       ),
@@ -474,13 +539,48 @@ class _MapScreenState extends State<MapScreen> {
           ),
         ),
 
+        // Share sits one control above Go to my location and lifts with it.
+        if (state.hasReferenceFix)
+          AnimatedPositioned(
+            duration: AppMotion.quick,
+            curve: AppMotion.easeOut,
+            right: 16,
+            bottom: (selected != null ? 188 : 76) + 54,
+            child: PressButton(
+              semanticLabel: 'Share my location',
+              onTap: () {
+                final point = state.referenceLocation;
+                shareLocationLink(
+                  context,
+                  lat: point.latitude,
+                  lng: point.longitude,
+                  title: 'My location',
+                );
+              },
+              child: Container(
+                width: 46,
+                height: 46,
+                decoration: BoxDecoration(
+                  color: const Color(0xF20F0F11),
+                  borderRadius: BorderRadius.circular(14),
+                  border: Border.all(color: AppColors.hairline),
+                ),
+                child: const Icon(
+                  Icons.share_location_rounded,
+                  color: AppColors.textPrimary,
+                  size: 21,
+                ),
+              ),
+            ),
+          ),
+
         // Location button. Lifted above the floating spot card when one is
         // open so the two never overlap.
         AnimatedPositioned(
           duration: AppMotion.quick,
           curve: AppMotion.easeOut,
           right: 16,
-          bottom: selected != null ? 244 : 132,
+          bottom: selected != null ? 188 : 76,
           child: PressButton(
             semanticLabel: 'Go to my location',
             onTap: _goToMyLocation,
@@ -527,7 +627,6 @@ class _MapScreenState extends State<MapScreen> {
                   style: TextStyle(
                     color: AppColors.textSecondary,
                     fontSize: 12.5,
-                    fontFamily: 'Inter',
                   ),
                 ),
               ),
@@ -538,7 +637,7 @@ class _MapScreenState extends State<MapScreen> {
         Positioned(
           left: 0,
           right: 0,
-          bottom: 132,
+          bottom: 76,
           child: Center(
             child: ConstrainedBox(
               constraints: const BoxConstraints(maxWidth: 430),
@@ -650,6 +749,58 @@ class _MapScreenState extends State<MapScreen> {
   }
 }
 
+/// A dismissible chip explaining that the basemap fell back for this session.
+class _FallbackNotice extends StatelessWidget {
+  const _FallbackNotice({required this.text, required this.onDismiss});
+
+  final String text;
+  final VoidCallback onDismiss;
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: Container(
+        padding: const EdgeInsets.only(left: 14, right: 4, top: 4, bottom: 4),
+        decoration: BoxDecoration(
+          color: const Color(0xE61A1A1D),
+          borderRadius: BorderRadius.circular(999),
+          border: Border.all(color: AppColors.hairline),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Flexible(
+              child: Text(
+                text,
+                style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                  color: AppColors.textSecondary,
+                ),
+              ),
+            ),
+            const SizedBox(width: 6),
+            Semantics(
+              button: true,
+              label: 'Dismiss',
+              child: InkWell(
+                onTap: onDismiss,
+                customBorder: const CircleBorder(),
+                child: const Padding(
+                  padding: EdgeInsets.all(6),
+                  child: Icon(
+                    Icons.close_rounded,
+                    size: 16,
+                    color: AppColors.textSecondary,
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 class _PlaceCard extends StatelessWidget {
   const _PlaceCard({super.key, required this.spot, this.distanceKm});
 
@@ -698,7 +849,6 @@ class _PlaceCard extends StatelessWidget {
                       fontSize: 15,
                       fontWeight: FontWeight.w800,
                       letterSpacing: -0.3,
-                      fontFamily: 'Inter',
                     ),
                   ),
                   const SizedBox(height: 5),
@@ -716,7 +866,6 @@ class _PlaceCard extends StatelessWidget {
                           color: AppColors.textPrimary,
                           fontSize: 12.5,
                           fontWeight: FontWeight.w800,
-                          fontFamily: 'Inter',
                         ),
                       ),
                       Text(
@@ -724,7 +873,6 @@ class _PlaceCard extends StatelessWidget {
                         style: const TextStyle(
                           color: AppColors.textFaint,
                           fontSize: 12,
-                          fontFamily: 'Inter',
                         ),
                       ),
                       const SizedBox(width: 8),
@@ -744,7 +892,6 @@ class _PlaceCard extends StatelessWidget {
                           style: const TextStyle(
                             color: AppColors.textFaint,
                             fontSize: 12,
-                            fontFamily: 'Inter',
                           ),
                         ),
                       ),
@@ -760,7 +907,6 @@ class _PlaceCard extends StatelessWidget {
                     style: const TextStyle(
                       color: AppColors.textSecondary,
                       fontSize: 11.5,
-                      fontFamily: 'Inter',
                     ),
                   ),
                 ],

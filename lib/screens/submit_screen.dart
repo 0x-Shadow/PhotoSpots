@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
@@ -5,19 +6,32 @@ import 'package:flutter_map/flutter_map.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:provider/provider.dart';
-import 'package:url_launcher/url_launcher.dart';
 
 import '../app_info.dart';
 import '../data/spot_repository.dart';
+import '../map/map_tile_layers.dart';
+import '../map/tile_sources.dart';
+import '../services/geocoding.dart';
 import '../state/app_state.dart';
+import '../state/location_outcome.dart';
+import '../state/settings_state.dart';
 import '../theme/app_animations.dart';
 import '../theme/app_theme.dart';
 import '../utils/format.dart';
+import '../widgets/location_prompt.dart';
+import '../widgets/spot_details_form.dart';
 
-/// A deliberately short publishing flow: choose the shot, then add just
-/// enough context to make it useful.
+/// Three deliberate steps: photo, location, details. The city comes from the
+/// pin, never from a hardcoded default.
 class SubmitScreen extends StatefulWidget {
   const SubmitScreen({super.key});
+
+  /// A cached user fix wins; otherwise the map's own centre is used. The demo
+  /// seed is only a last resort for a map that has not laid out yet.
+  static LatLng initialPin(AppState state, {LatLng? mapCenter}) {
+    if (state.hasCachedFix) return state.referenceLocation;
+    return mapCenter ?? AppState.fallbackCenter;
+  }
 
   @override
   State<SubmitScreen> createState() => _SubmitScreenState();
@@ -26,77 +40,51 @@ class SubmitScreen extends StatefulWidget {
 class _SubmitScreenState extends State<SubmitScreen> {
   int _step = 0;
 
-  final _titleController = TextEditingController();
-  final _descController = TextEditingController();
-  final _cityController = TextEditingController(text: 'Lisbon');
+  final _draft = SpotDraftController();
+  final _geocoder = const GeocodingService();
+  final _searchController = TextEditingController();
+  final _mapController = MapController();
 
-  String? _bestTime;
-  final Set<String> _tags = {};
-  LatLng _pinned = AppState.fallbackCenter;
+  Timer? _searchTimer;
+  Timer? _reverseTimer;
+
   Uint8List? _photoBytes;
+  LatLng _pinned = AppState.fallbackCenter;
+  String _address = '';
+  bool _cityManual = false;
+  bool _searching = false;
+  bool _streetFallback = false;
   bool _submitting = false;
+  List<PlaceSuggestion> _suggestions = const [];
 
-  static const _stepTitles = ['Choose photo', 'Share the spot'];
-
-  static const _tagOptions = [
-    'skyline',
-    'sunset',
-    'date',
-    'friends',
-    'street',
-    'architecture',
-    'water',
-    'nightlife',
-    'hidden gem',
-    'reflection',
-  ];
-
-  static const _bestTimeOptions = [
-    'Golden hour',
-    'Blue hour',
-    'Morning light',
-    'Night',
-    'Afternoon',
-  ];
-
-  @override
-  void dispose() {
-    _titleController.dispose();
-    _descController.dispose();
-    _cityController.dispose();
-    super.dispose();
-  }
+  static const _stepTitles = ['Photo', 'Location', 'Details'];
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
-      final state = context.read<AppState>();
-      _pinned = state.referenceLocation;
-      if (!state.hasUserLocation) {
-        state.requestLocation().then((granted) {
-          if (mounted && granted) {
-            setState(
-              () => _pinned = context.read<AppState>().referenceLocation,
-            );
-          }
-        });
-      }
+      setState(
+        () => _pinned =
+            SubmitScreen.initialPin(context.read<AppState>()),
+      );
     });
   }
 
-  bool get _canProceed {
-    switch (_step) {
-      case 0:
-        return _photoBytes != null;
-      case 1:
-        return _titleController.text.trim().isNotEmpty &&
-            _cityController.text.trim().isNotEmpty;
-      default:
-        return true;
-    }
+  @override
+  void dispose() {
+    _searchTimer?.cancel();
+    _reverseTimer?.cancel();
+    _searchController.dispose();
+    _mapController.dispose();
+    super.dispose();
   }
+
+  bool get _canProceed => switch (_step) {
+        0 => _photoBytes != null,
+        1 => true,
+        _ => _draft.canPublish,
+      };
 
   Future<void> _pickPhoto(ImageSource source) async {
     final messenger = ScaffoldMessenger.of(context);
@@ -128,38 +116,195 @@ class _SubmitScreenState extends State<SubmitScreen> {
     }
   }
 
-  Future<void> _next() async {
-    if (_step == 1) {
-      await _publish();
+  /// Moves the pin and schedules a reverse lookup. A failed lookup leaves the
+  /// pin in place and reveals the manual city field.
+  void _setPin(LatLng point) {
+    _reverseTimer?.cancel();
+    setState(() {
+      _pinned = point;
+      _address = '';
+      _cityManual = false;
+      _draft.city = '';
+    });
+    _reverseTimer = Timer(const Duration(milliseconds: 400), () async {
+      final place = await _geocoder.reverse(point.latitude, point.longitude);
+      if (!mounted || _pinned != point) return;
+      setState(() {
+        if (place == null) {
+          _cityManual = true;
+          return;
+        }
+        _address = place.label;
+        _draft.city = place.city;
+        _cityManual = place.city.isEmpty;
+        if (_draft.name.isEmpty) {
+          _draft.name = place.label.split(',').first.trim();
+        }
+      });
+    });
+  }
+
+  void _search(String query) {
+    _searchTimer?.cancel();
+    if (query.trim().isEmpty) {
+      setState(() => _suggestions = const []);
       return;
     }
-    if (!_canProceed) return;
-    setState(() => _step++);
+    _searchTimer = Timer(const Duration(milliseconds: 500), () async {
+      setState(() => _searching = true);
+      final results = await _geocoder.search(query);
+      if (!mounted) return;
+      setState(() {
+        _suggestions = results;
+        _searching = false;
+      });
+    });
+  }
+
+  void _chooseSuggestion(PlaceSuggestion suggestion) {
+    final point = LatLng(suggestion.lat, suggestion.lng);
+    _mapController.move(point, 15);
+    _reverseTimer?.cancel();
+    setState(() {
+      _pinned = point;
+      _address = suggestion.label;
+      _suggestions = const [];
+      _cityManual = suggestion.city.isEmpty;
+      _draft
+        ..city = suggestion.city
+        ..name = suggestion.label.split(',').first.trim();
+    });
+  }
+
+  Future<void> _useMyLocation() async {
+    final outcome = await runLocationFlow(context);
+    if (!mounted || outcome != LocationOutcome.granted) return;
+    final state = context.read<AppState>();
+    final position = state.userLocation;
+    if (position == null) return;
+    final point = LatLng(position.latitude, position.longitude);
+    _mapController.move(point, 15);
+    _setPin(point);
+  }
+
+  Future<void> _confirmPublish() async {
+    if (_submitting || !_draft.canPublish) return;
+    final confirmed = await showModalBottomSheet<bool>(
+      context: context,
+      isScrollControlled: true,
+      showDragHandle: true,
+      backgroundColor: AppColors.surfaceElevated,
+      builder: (sheetContext) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(22, 6, 22, 22),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('Ready to publish?', style: Theme.of(sheetContext).textTheme.titleLarge),
+              const SizedBox(height: 14),
+              Row(
+                children: [
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(12),
+                    child: SizedBox(
+                      width: 64,
+                      height: 64,
+                      child: _photoBytes == null
+                          ? const Icon(Icons.image_rounded,
+                              color: AppColors.textFaint, size: 28)
+                          : Image.memory(_photoBytes!, fit: BoxFit.cover),
+                    ),
+                  ),
+                  const SizedBox(width: 14),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(_draft.name,
+                            style: Theme.of(sheetContext).textTheme.titleMedium),
+                        const SizedBox(height: 3),
+                        Text(
+                          _draft.city.isEmpty
+                              ? 'City not set'
+                              : _draft.city,
+                          style: Theme.of(sheetContext).textTheme.bodySmall,
+                        ),
+                        if (_address.isNotEmpty)
+                          Text(
+                            _address,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: Theme.of(sheetContext).textTheme.bodySmall,
+                          ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 20),
+              Row(
+                children: [
+                  Expanded(
+                    child: TextButton(
+                      onPressed: () => Navigator.of(sheetContext).pop(false),
+                      child: const Text('Keep editing'),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: PressButton(
+                      semanticLabel: 'Publish spot',
+                      onTap: () => Navigator.of(sheetContext).pop(true),
+                      child: Container(
+                        height: 48,
+                        alignment: Alignment.center,
+                        decoration: BoxDecoration(
+                          color: AppColors.action,
+                          borderRadius: BorderRadius.circular(14),
+                        ),
+                        child: Text(
+                          'Publish',
+                          style: Theme.of(sheetContext)
+                              .textTheme
+                              .labelLarge
+                              ?.copyWith(
+                                color: AppColors.onAction,
+                                fontWeight: FontWeight.w800,
+                              ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    await _publish();
   }
 
   Future<void> _publish() async {
     if (_submitting) return;
-    if (!_canProceed) {
-      setState(() => _step = 0);
-      return;
-    }
-
     final messenger = ScaffoldMessenger.of(context);
     final navigator = Navigator.of(context);
     setState(() => _submitting = true);
 
     try {
       await context.read<AppState>().submitSpot(
-        title: _titleController.text.trim(),
-        description: _descController.text.trim().isEmpty
-            ? 'A photo spot shared by the findr community.'
-            : _descController.text.trim(),
-        location: _pinned,
-        city: _cityController.text.trim(),
-        tags: _tags.toList(),
-        bestTime: _bestTime,
-        photoBytes: _photoBytes,
-      );
+            title: _draft.name.trim(),
+            description: _draft.tip.trim().isEmpty
+                ? 'A photo spot shared by the ${AppInfo.name} community.'
+                : _draft.tip.trim(),
+            location: _pinned,
+            city: _draft.city.trim(),
+            tags: _draft.tags.toList(),
+            bestTime: _draft.bestTime,
+            photoBytes: _photoBytes,
+          );
       if (!mounted) return;
       navigator.pop();
       messenger.showSnackBar(
@@ -194,7 +339,7 @@ class _SubmitScreenState extends State<SubmitScreen> {
     return PopScope(
       canPop: _step == 0,
       onPopInvokedWithResult: (didPop, _) {
-        if (!didPop) setState(() => _step--);
+        if (!didPop) _back();
       },
       child: Scaffold(
         backgroundColor: AppColors.background,
@@ -203,8 +348,8 @@ class _SubmitScreenState extends State<SubmitScreen> {
             semanticLabel: _step == 0 ? 'Close' : 'Back',
             onTap: _back,
             child: Container(
-              width: 40,
-              height: 40,
+              width: 44,
+              height: 44,
               margin: const EdgeInsets.only(left: 8),
               decoration: BoxDecoration(
                 color: const Color(0x14FFFFFF),
@@ -226,14 +371,26 @@ class _SubmitScreenState extends State<SubmitScreen> {
             child: Column(
               children: [
                 _ProgressBar(step: _step, titles: _stepTitles),
-                Expanded(child: _stepContent()),
-                _BottomBar(
-                  step: _step,
-                  enabled: _canProceed && !_submitting,
-                  submitting: _submitting,
-                  onBack: _back,
-                  onNext: _next,
-                ),
+                if (_step == 2)
+                  Expanded(
+                    child: SpotDetailsForm(
+                      controller: _draft,
+                      initialName: _draft.name,
+                      initialCity: _draft.city,
+                      cityEditable: _cityManual,
+                      onPublish: _confirmPublish,
+                    ),
+                  )
+                else ...[
+                  Expanded(child: _stepContent()),
+                  _BottomBar(
+                    step: _step,
+                    enabled: _canProceed && !_submitting,
+                    onNext: () {
+                      if (_canProceed) setState(() => _step++);
+                    },
+                  ),
+                ],
               ],
             ),
           ),
@@ -242,35 +399,33 @@ class _SubmitScreenState extends State<SubmitScreen> {
     );
   }
 
-  Widget _stepContent() {
-    switch (_step) {
-      case 0:
-        return _PhotoStep(
-          photoBytes: _photoBytes,
-          onPick: _pickPhoto,
-          onClear: () => setState(() => _photoBytes = null),
-        );
-      case 1:
-        return _DetailsStep(
-          titleController: _titleController,
-          descController: _descController,
-          cityController: _cityController,
-          bestTime: _bestTime,
-          tags: _tags,
-          bestTimeOptions: _bestTimeOptions,
-          tagOptions: _tagOptions,
-          onChanged: () => setState(() {}),
-          onBestTimeChanged: (value) => setState(() => _bestTime = value),
-          onTagsChanged: (value) => setState(() {
-            _tags
-              ..clear()
-              ..addAll(value);
-          }),
-        );
-      default:
-        return const SizedBox.shrink();
-    }
-  }
+  Widget _stepContent() => switch (_step) {
+        0 => _PhotoStep(
+            photoBytes: _photoBytes,
+            onPick: _pickPhoto,
+            onClear: () => setState(() => _photoBytes = null),
+          ),
+        _ => _LocationStep(
+            pinned: _pinned,
+            address: _address,
+            city: _draft.city,
+            cityEditable: _cityManual,
+            suggestions: _suggestions,
+            searching: _searching,
+            onSearch: _search,
+            onChoose: _chooseSuggestion,
+            onPinMoved: _setPin,
+            onUseMyLocation: _useMyLocation,
+            onCityChanged: (value) => setState(() => _draft.city = value),
+            streetFallback: _streetFallback,
+            onFallback: () {
+              if (_streetFallback) return;
+              setState(() => _streetFallback = true);
+            },
+            mapController: _mapController,
+            searchController: _searchController,
+          ),
+      };
 }
 
 class _ProgressBar extends StatelessWidget {
@@ -281,6 +436,7 @@ class _ProgressBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context).textTheme;
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
       child: Column(
@@ -289,13 +445,12 @@ class _ProgressBar extends StatelessWidget {
             children: [
               for (var i = 0; i < titles.length; i++)
                 Expanded(
-                  child: Container(
+                  child: AnimatedContainer(
+                    duration: AppMotion.instant,
                     height: 3,
                     margin: const EdgeInsets.symmetric(horizontal: 3),
                     decoration: BoxDecoration(
-                      color: i <= step
-                          ? AppColors.action
-                          : const Color(0x1AFFFFFF),
+                      color: i <= step ? AppColors.action : AppColors.hairline,
                       borderRadius: BorderRadius.circular(2),
                     ),
                   ),
@@ -312,13 +467,12 @@ class _ProgressBar extends StatelessWidget {
                     textAlign: TextAlign.center,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
+                    style: theme.labelMedium?.copyWith(
                       color: i <= step
                           ? AppColors.textPrimary
                           : AppColors.textFaint,
-                      fontSize: 10.5,
-                      fontWeight: i <= step ? FontWeight.w700 : FontWeight.w500,
-                      fontFamily: 'Inter',
+                      fontWeight:
+                          i <= step ? FontWeight.w700 : FontWeight.w500,
                     ),
                   ),
                 ),
@@ -334,19 +488,16 @@ class _BottomBar extends StatelessWidget {
   const _BottomBar({
     required this.step,
     required this.enabled,
-    required this.submitting,
-    required this.onBack,
     required this.onNext,
   });
 
   final int step;
   final bool enabled;
-  final bool submitting;
-  final VoidCallback onBack;
   final VoidCallback onNext;
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context).textTheme;
     return Container(
       padding: const EdgeInsets.fromLTRB(20, 12, 20, 10),
       decoration: BoxDecoration(
@@ -355,71 +506,26 @@ class _BottomBar extends StatelessWidget {
       ),
       child: SafeArea(
         top: false,
-        child: Row(
-          children: [
-            if (step > 0) ...[
-              Expanded(
-                child: SizedBox(
-                  height: 52,
-                  child: OutlinedButton(
-                    onPressed: submitting ? null : onBack,
-                    style: OutlinedButton.styleFrom(
-                      foregroundColor: AppColors.textPrimary,
-                      side: const BorderSide(color: AppColors.hairline),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(14),
-                      ),
-                    ),
-                    child: const Text(
-                      'Back',
-                      style: TextStyle(
-                        fontSize: 14.5,
-                        fontWeight: FontWeight.w700,
-                        fontFamily: 'Inter',
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-              const SizedBox(width: 10),
-            ],
-            Expanded(
-              flex: step > 0 ? 2 : 1,
-              child: PressButton(
-                semanticLabel: step == 1 ? 'Publish spot' : 'Next step',
-                enabled: enabled,
-                onTap: onNext,
-                child: Container(
-                  height: 52,
-                  decoration: BoxDecoration(
-                    color: enabled ? AppColors.action : const Color(0x1AFFFFFF),
-                    borderRadius: BorderRadius.circular(14),
-                  ),
-                  alignment: Alignment.center,
-                  child: submitting
-                      ? const SizedBox(
-                          width: 20,
-                          height: 20,
-                          child: CircularProgressIndicator(
-                            strokeWidth: 2,
-                            color: AppColors.onAction,
-                          ),
-                        )
-                      : Text(
-                          step == 1 ? 'Publish spot' : 'Next',
-                          style: TextStyle(
-                            color: enabled
-                                ? AppColors.onAction
-                                : AppColors.textFaint,
-                            fontSize: 14.5,
-                            fontWeight: FontWeight.w800,
-                            fontFamily: 'Inter',
-                          ),
-                        ),
-                ),
+        child: PressButton(
+          semanticLabel: 'Next step',
+          enabled: enabled,
+          onTap: onNext,
+          child: Container(
+            height: 52,
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              color: enabled ? AppColors.action : AppColors.hairline,
+              borderRadius: BorderRadius.circular(14),
+            ),
+            child: Text(
+              step == 0 ? 'Next' : 'Continue',
+              style: theme.labelLarge?.copyWith(
+                color:
+                    enabled ? AppColors.onAction : AppColors.textFaint,
+                fontWeight: FontWeight.w800,
               ),
             ),
-          ],
+          ),
         ),
       ),
     );
@@ -439,27 +545,15 @@ class _PhotoStep extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context).textTheme;
     return ListView(
       padding: const EdgeInsets.fromLTRB(20, 16, 20, 20),
       children: [
-        const Text(
-          'Show the spot at its best',
-          style: TextStyle(
-            color: AppColors.textPrimary,
-            fontSize: 17,
-            fontWeight: FontWeight.w800,
-            fontFamily: 'Inter',
-          ),
-        ),
+        Text('Show the spot at its best', style: theme.titleMedium),
         const SizedBox(height: 5),
-        const Text(
+        Text(
           'One photo is required. Pick your best shot — it becomes the cover.',
-          style: TextStyle(
-            color: AppColors.textSecondary,
-            fontSize: 13,
-            height: 1.45,
-            fontFamily: 'Inter',
-          ),
+          style: theme.bodySmall,
         ),
         const SizedBox(height: 18),
         GestureDetector(
@@ -480,29 +574,14 @@ class _PhotoStep extends StatelessWidget {
                 ? Column(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
-                      const Icon(
-                        Icons.add_a_photo_rounded,
-                        color: AppColors.textSecondary,
-                        size: 42,
-                      ),
+                      const Icon(Icons.add_a_photo_rounded,
+                          color: AppColors.textSecondary, size: 42),
                       const SizedBox(height: 12),
-                      const Text(
-                        'Add your best shot',
-                        style: TextStyle(
-                          color: AppColors.textPrimary,
-                          fontSize: 14.5,
-                          fontWeight: FontWeight.w700,
-                          fontFamily: 'Inter',
-                        ),
-                      ),
+                      Text('Add your best shot', style: theme.titleSmall),
                       const SizedBox(height: 4),
-                      const Text(
+                      Text(
                         'JPG or PNG · one photo required',
-                        style: TextStyle(
-                          color: AppColors.textFaint,
-                          fontSize: 12,
-                          fontFamily: 'Inter',
-                        ),
+                        style: theme.bodySmall,
                       ),
                       const SizedBox(height: 20),
                       Row(
@@ -543,33 +622,8 @@ class _PhotoStep extends StatelessWidget {
                                 color: Colors.black54,
                                 shape: BoxShape.circle,
                               ),
-                              child: const Icon(
-                                Icons.close_rounded,
-                                color: Colors.white,
-                                size: 19,
-                              ),
-                            ),
-                          ),
-                        ),
-                      ),
-                      Positioned(
-                        bottom: 12,
-                        left: 12,
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 10,
-                            vertical: 5,
-                          ),
-                          decoration: BoxDecoration(
-                            color: Colors.black54,
-                            borderRadius: BorderRadius.circular(999),
-                          ),
-                          child: const Text(
-                            'Tap to change',
-                            style: TextStyle(
-                              color: Colors.white,
-                              fontSize: 11,
-                              fontFamily: 'Inter',
+                              child: const Icon(Icons.close_rounded,
+                                  color: Colors.white, size: 19),
                             ),
                           ),
                         ),
@@ -583,11 +637,8 @@ class _PhotoStep extends StatelessWidget {
           photoBytes == null
               ? 'A photo is required to continue'
               : 'Looking good — continue when ready.',
-          style: TextStyle(
+          style: theme.bodySmall?.copyWith(
             color: photoBytes == null ? AppColors.textFaint : AppColors.success,
-            fontSize: 12.5,
-            fontWeight: FontWeight.w600,
-            fontFamily: 'Inter',
           ),
         ),
       ],
@@ -595,7 +646,6 @@ class _PhotoStep extends StatelessWidget {
   }
 }
 
-/// Small pill used on the photo step to pick gallery or camera.
 class _PhotoSourceButton extends StatelessWidget {
   const _PhotoSourceButton({
     required this.icon,
@@ -611,6 +661,7 @@ class _PhotoSourceButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context).textTheme;
     return PressButton(
       semanticLabel: label == 'Camera'
           ? 'Take a photo with the camera'
@@ -629,19 +680,14 @@ class _PhotoSourceButton extends StatelessWidget {
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(
-              icon,
-              size: 17,
-              color: filled ? AppColors.onAction : AppColors.textPrimary,
-            ),
+            Icon(icon,
+                size: 17,
+                color: filled ? AppColors.onAction : AppColors.textPrimary),
             const SizedBox(width: 7),
             Text(
               label,
-              style: TextStyle(
+              style: theme.labelLarge?.copyWith(
                 color: filled ? AppColors.onAction : AppColors.textPrimary,
-                fontSize: 13,
-                fontWeight: FontWeight.w700,
-                fontFamily: 'Inter',
               ),
             ),
           ],
@@ -651,560 +697,194 @@ class _PhotoSourceButton extends StatelessWidget {
   }
 }
 
-class _DetailsStep extends StatefulWidget {
-  const _DetailsStep({
-    required this.titleController,
-    required this.descController,
-    required this.cityController,
-    required this.bestTime,
-    required this.tags,
-    required this.bestTimeOptions,
-    required this.tagOptions,
-    required this.onChanged,
-    required this.onBestTimeChanged,
-    required this.onTagsChanged,
+/// Map-first location step: search, tap to place, and an address derived from
+/// the pin. A failed reverse lookup reveals a manual city field.
+class _LocationStep extends StatelessWidget {
+  const _LocationStep({
+    required this.pinned,
+    required this.address,
+    required this.city,
+    required this.cityEditable,
+    required this.suggestions,
+    required this.searching,
+    required this.onSearch,
+    required this.onChoose,
+    required this.onPinMoved,
+    required this.onUseMyLocation,
+    required this.onCityChanged,
+    required this.streetFallback,
+    required this.onFallback,
+    required this.mapController,
+    required this.searchController,
   });
-
-  final TextEditingController titleController;
-  final TextEditingController descController;
-  final TextEditingController cityController;
-  final String? bestTime;
-  final Set<String> tags;
-  final List<String> bestTimeOptions;
-  final List<String> tagOptions;
-  final VoidCallback onChanged;
-  final ValueChanged<String?> onBestTimeChanged;
-  final ValueChanged<Set<String>> onTagsChanged;
-
-  @override
-  State<_DetailsStep> createState() => _DetailsStepState();
-}
-
-class _DetailsStepState extends State<_DetailsStep> {
-  @override
-  Widget build(BuildContext context) {
-    return ListView(
-      padding: const EdgeInsets.fromLTRB(20, 8, 20, 20),
-      children: [
-        const _FieldLabel('Spot name'),
-        const SizedBox(height: 8),
-        TextFormField(
-          controller: widget.titleController,
-          textCapitalization: TextCapitalization.words,
-          onChanged: (_) => widget.onChanged(),
-          style: const TextStyle(color: AppColors.textPrimary),
-          decoration: const InputDecoration(
-            hintText: 'Miradouro da Senhora do Monte',
-          ),
-        ),
-        const SizedBox(height: 18),
-        const _FieldLabel('A tip for visitors (optional)'),
-        const SizedBox(height: 8),
-        TextFormField(
-          controller: widget.descController,
-          maxLines: 4,
-          textCapitalization: TextCapitalization.sentences,
-          onChanged: (_) => widget.onChanged(),
-          style: const TextStyle(color: AppColors.textPrimary),
-          decoration: const InputDecoration(
-            hintText: 'Where to stand, when to go, what lens…',
-          ),
-        ),
-        const SizedBox(height: 6),
-        Text(
-          widget.descController.text.trim().isEmpty
-              ? 'A short note helps others find the exact angle.'
-              : 'Nice — that gives people useful context.',
-          style: const TextStyle(
-            color: AppColors.textFaint,
-            fontSize: 11.5,
-            fontFamily: 'Inter',
-          ),
-        ),
-        const SizedBox(height: 18),
-        const _FieldLabel('City'),
-        const SizedBox(height: 8),
-        TextFormField(
-          controller: widget.cityController,
-          textCapitalization: TextCapitalization.words,
-          onChanged: (_) => widget.onChanged(),
-          style: const TextStyle(color: AppColors.textPrimary),
-          decoration: const InputDecoration(hintText: 'Lisbon'),
-        ),
-        const SizedBox(height: 22),
-        const _FieldLabel('Best time to shoot'),
-        const SizedBox(height: 10),
-        Wrap(
-          spacing: 8,
-          runSpacing: 8,
-          children: [
-            for (final option in widget.bestTimeOptions)
-              _TagChip(
-                label: option,
-                selected: widget.bestTime == option,
-                onTap: () => widget.onBestTimeChanged(
-                  widget.bestTime == option ? null : option,
-                ),
-              ),
-          ],
-        ),
-        const SizedBox(height: 22),
-        const _FieldLabel('Tags'),
-        const SizedBox(height: 10),
-        Wrap(
-          spacing: 8,
-          runSpacing: 8,
-          children: [
-            for (final tag in widget.tagOptions)
-              _TagChip(
-                label: '#$tag',
-                selected: widget.tags.contains(tag),
-                onTap: () {
-                  final next = Set<String>.from(widget.tags);
-                  if (!next.remove(tag)) next.add(tag);
-                  widget.onTagsChanged(next);
-                },
-              ),
-          ],
-        ),
-        const SizedBox(height: 24),
-      ],
-    );
-  }
-}
-
-class _FieldLabel extends StatelessWidget {
-  const _FieldLabel(this.text);
-
-  final String text;
-
-  @override
-  Widget build(BuildContext context) {
-    return Text(
-      text,
-      style: const TextStyle(
-        color: AppColors.textPrimary,
-        fontSize: 13.5,
-        fontWeight: FontWeight.w700,
-        fontFamily: 'Inter',
-      ),
-    );
-  }
-}
-
-class _TagChip extends StatelessWidget {
-  const _TagChip({
-    required this.label,
-    required this.selected,
-    required this.onTap,
-  });
-
-  final String label;
-  final bool selected;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(999),
-      child: AnimatedContainer(
-        duration: AppMotion.instant,
-        constraints: const BoxConstraints(minHeight: 38),
-        padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 8),
-        decoration: BoxDecoration(
-          color: selected ? AppColors.action : const Color(0x14FFFFFF),
-          borderRadius: BorderRadius.circular(999),
-          border: Border.all(
-            color: selected ? AppColors.action : AppColors.hairline,
-          ),
-        ),
-        child: Text(
-          label,
-          style: TextStyle(
-            color: selected ? AppColors.onAction : AppColors.textSecondary,
-            fontSize: 12.5,
-            fontWeight: selected ? FontWeight.w800 : FontWeight.w600,
-            fontFamily: 'Inter',
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _LocationStep extends StatefulWidget {
-  const _LocationStep({required this.pinned, required this.onPinMoved});
 
   final LatLng pinned;
+  final String address;
+  final String city;
+  final bool cityEditable;
+  final List<PlaceSuggestion> suggestions;
+  final bool searching;
+  final ValueChanged<String> onSearch;
+  final ValueChanged<PlaceSuggestion> onChoose;
   final ValueChanged<LatLng> onPinMoved;
-
-  @override
-  State<_LocationStep> createState() => _LocationStepState();
-}
-
-class _LocationStepState extends State<_LocationStep> {
-  final _mapController = MapController();
-  late LatLng _center;
-
-  @override
-  void initState() {
-    super.initState();
-    _center = widget.pinned;
-  }
-
-  @override
-  void dispose() {
-    _mapController.dispose();
-    super.dispose();
-  }
-
-  Future<void> _useMyLocation() async {
-    final state = context.read<AppState>();
-    final messenger = ScaffoldMessenger.of(context);
-    final ok = await state.requestLocation();
-    if (!mounted) return;
-
-    if (!ok || state.userLocation == null) {
-      messenger.showSnackBar(
-        SnackBar(content: Text(state.locationError ?? 'Location unavailable.')),
-      );
-      return;
-    }
-
-    final point = LatLng(
-      state.userLocation!.latitude,
-      state.userLocation!.longitude,
-    );
-    _mapController.move(point, 16);
-    setState(() => _center = point);
-    widget.onPinMoved(point);
-  }
+  final VoidCallback onUseMyLocation;
+  final ValueChanged<String> onCityChanged;
+  final bool streetFallback;
+  final VoidCallback onFallback;
+  final MapController mapController;
+  final TextEditingController searchController;
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context).textTheme;
+    final style = streetFallback
+        ? TileSources.street
+        : context.watch<SettingsState>().activeMapStyle;
+
     return ListView(
       padding: const EdgeInsets.fromLTRB(20, 8, 20, 20),
       children: [
-        const Text(
-          'Drag the map so the pin sits on the spot',
-          style: TextStyle(
-            color: AppColors.textSecondary,
-            fontSize: 13,
-            fontFamily: 'Inter',
+        TextField(
+          controller: searchController,
+          onChanged: onSearch,
+          textInputAction: TextInputAction.search,
+          decoration: InputDecoration(
+            hintText: 'Search a place',
+            prefixIcon: const Icon(Icons.search_rounded, size: 20),
+            suffixIcon: searching
+                ? const Padding(
+                    padding: EdgeInsets.all(14),
+                    child: SizedBox(
+                      width: 16,
+                      height: 16,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    ),
+                  )
+                : null,
           ),
         ),
-        const SizedBox(height: 14),
-        Container(
-          height: 320,
-          clipBehavior: Clip.antiAlias,
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(20),
-            border: Border.all(color: AppColors.hairline),
-          ),
-          child: Stack(
-            alignment: Alignment.center,
-            children: [
-              FlutterMap(
-                mapController: _mapController,
-                options: MapOptions(
-                  initialCenter: _center,
-                  initialZoom: 14,
-                  maxZoom: 18,
-                  backgroundColor: AppColors.mapBackground,
-                  interactionOptions: const InteractionOptions(
-                    flags:
-                        InteractiveFlag.drag |
-                        InteractiveFlag.pinchZoom |
-                        InteractiveFlag.doubleTapZoom |
-                        InteractiveFlag.flingAnimation,
-                  ),
-                  onPositionChanged: (camera, _) {
-                    final next = camera.center;
-                    if ((next.latitude - _center.latitude).abs() > 1e-6 ||
-                        (next.longitude - _center.longitude).abs() > 1e-6) {
-                      setState(() => _center = next);
-                      widget.onPinMoved(next);
-                    }
-                  },
-                ),
-                children: [
-                  TileLayer(
-                    urlTemplate: 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
-                    subdomains: const ['a', 'b', 'c', 'd'],
-                    userAgentPackageName: 'com.photospot.app',
-                    maxZoom: 18,
-                    retinaMode: RetinaMode.isHighDensity(context),
-                  ),
-                  RichAttributionWidget(
-                    alignment: AttributionAlignment.bottomLeft,
-                    attributions: [
-                      TextSourceAttribution(
-                        'OpenStreetMap contributors',
-                        onTap: () => launchUrl(
-                          Uri.parse('https://www.openstreetmap.org/copyright'),
-                        ),
-                      ),
-                      TextSourceAttribution(
-                        'CARTO',
-                        onTap: () => launchUrl(
-                          Uri.parse('https://carto.com/attributions'),
-                        ),
-                      ),
-                    ],
-                  ),
-                ],
-              ),
-              IgnorePointer(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Container(
-                      padding: const EdgeInsets.all(9),
-                      decoration: const BoxDecoration(
-                        color: AppColors.action,
-                        shape: BoxShape.circle,
-                        boxShadow: [
-                          BoxShadow(
-                            color: Colors.black54,
-                            blurRadius: 10,
-                            offset: Offset(0, 4),
-                          ),
-                        ],
-                      ),
-                      child: const Icon(
-                        Icons.photo_camera_rounded,
-                        color: AppColors.onAction,
-                        size: 21,
-                      ),
+        if (suggestions.isNotEmpty) ...[
+          const SizedBox(height: 8),
+          DecoratedBox(
+            decoration: BoxDecoration(
+              color: AppColors.surfaceElevated,
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(color: AppColors.hairline),
+            ),
+            child: Column(
+              children: [
+                for (final suggestion in suggestions)
+                  InkWell(
+                    onTap: () => onChoose(suggestion),
+                    child: ListTile(
+                      leading: const Icon(Icons.place_outlined,
+                          color: AppColors.accent, size: 20),
+                      title: Text(suggestion.label, style: theme.bodyLarge),
+                      subtitle: suggestion.city.isEmpty
+                          ? null
+                          : Text(suggestion.city, style: theme.bodySmall),
                     ),
-                    const Icon(
-                      Icons.arrow_drop_down_rounded,
-                      color: AppColors.textPrimary,
-                      size: 28,
+                  ),
+              ],
+            ),
+          ),
+        ],
+        const SizedBox(height: 12),
+        ClipRRect(
+          borderRadius: BorderRadius.circular(20),
+          child: SizedBox(
+            height: 320,
+            child: FlutterMap(
+              mapController: mapController,
+              options: MapOptions(
+                initialCenter: pinned,
+                initialZoom: 14,
+                maxZoom: 18,
+                backgroundColor: AppColors.mapBackground,
+                interactionOptions: const InteractionOptions(
+                  flags: InteractiveFlag.drag |
+                      InteractiveFlag.pinchZoom |
+                      InteractiveFlag.doubleTapZoom |
+                      InteractiveFlag.flingAnimation,
+                ),
+                onTap: (_, point) => onPinMoved(point),
+                onPositionChanged: (camera, _) {
+                  final next = camera.center;
+                  if ((next.latitude - pinned.latitude).abs() > 1e-6 ||
+                      (next.longitude - pinned.longitude).abs() > 1e-6) {
+                    onPinMoved(next);
+                  }
+                },
+              ),
+              children: [
+                MapTileLayers(style: style, onFallback: (_) => onFallback()),
+                MarkerLayer(
+                  markers: [
+                    Marker(
+                      point: pinned,
+                      width: 36,
+                      height: 36,
+                      child: const Icon(
+                        Icons.place_rounded,
+                        color: AppColors.accent,
+                        size: 34,
+                      ),
                     ),
                   ],
                 ),
-              ),
-            ],
+                MapAttribution(style: style),
+              ],
+            ),
           ),
         ),
         const SizedBox(height: 12),
         Row(
           children: [
-            const Expanded(
+            Expanded(
               child: Text(
-                'Pin set on the map',
-                style: TextStyle(
-                  color: AppColors.textSecondary,
-                  fontSize: 12.5,
-                  fontFamily: 'Inter',
-                ),
+                address.isEmpty ? 'Tap or drag the map to place the pin' : address,
+                style: theme.bodySmall,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
               ),
             ),
+            const SizedBox(width: 8),
             TextButton.icon(
-              onPressed: _useMyLocation,
+              onPressed: onUseMyLocation,
               icon: const Icon(Icons.my_location_rounded, size: 16),
               label: const Text('Use my location'),
               style: TextButton.styleFrom(
                 foregroundColor: AppColors.textPrimary,
-                textStyle: const TextStyle(
-                  fontFamily: 'Inter',
-                  fontSize: 12.5,
-                  fontWeight: FontWeight.w600,
-                ),
+                textStyle: theme.labelLarge,
               ),
             ),
           ],
         ),
+        const SizedBox(height: 4),
         Text(
-          '${_center.latitude.toStringAsFixed(5)}, '
-          '${_center.longitude.toStringAsFixed(5)}',
-          style: const TextStyle(
-            color: AppColors.textFaint,
-            fontSize: 11.5,
-            fontFamily: 'Inter',
-          ),
+          '${pinned.latitude.toStringAsFixed(5)}, '
+          '${pinned.longitude.toStringAsFixed(5)}',
+          style: theme.bodySmall?.copyWith(color: AppColors.textFaint),
         ),
-      ],
-    );
-  }
-}
-
-// Kept as a ready-to-reuse preview surface for a future edit flow.
-// ignore: unused_element
-class _ReviewStep extends StatelessWidget {
-  const _ReviewStep({
-    required this.photoBytes,
-    required this.title,
-    required this.description,
-    required this.city,
-    required this.bestTime,
-    required this.tags,
-    required this.latitude,
-    required this.longitude,
-  });
-
-  final Uint8List? photoBytes;
-  final String title;
-  final String description;
-  final String city;
-  final String? bestTime;
-  final List<String> tags;
-  final double latitude;
-  final double longitude;
-
-  @override
-  Widget build(BuildContext context) {
-    return ListView(
-      padding: const EdgeInsets.fromLTRB(20, 8, 20, 20),
-      children: [
-        ClipRRect(
-          borderRadius: BorderRadius.circular(20),
-          child: Container(
-            height: 220,
-            color: AppColors.surfaceElevated,
-            child: photoBytes != null
-                ? Image.memory(photoBytes!, fit: BoxFit.cover)
-                : const Center(
-                    child: Icon(
-                      Icons.landscape_rounded,
-                      color: AppColors.textFaint,
-                      size: 40,
-                    ),
-                  ),
-          ),
-        ),
-        const SizedBox(height: 16),
-        Text(
-          title,
-          style: const TextStyle(
-            color: AppColors.textPrimary,
-            fontSize: 21,
-            fontWeight: FontWeight.w800,
-            letterSpacing: -0.5,
-            fontFamily: 'Inter',
-          ),
-        ),
-        const SizedBox(height: 6),
-        Row(
-          children: [
-            const Icon(
-              Icons.place_rounded,
-              color: AppColors.textSecondary,
-              size: 14,
+        if (cityEditable) ...[
+          const SizedBox(height: 12),
+          TextField(
+            onChanged: onCityChanged,
+            textCapitalization: TextCapitalization.words,
+            decoration: const InputDecoration(
+              labelText: 'City',
+              hintText: 'Enter the nearest city',
             ),
-            const SizedBox(width: 4),
-            Text(
-              city,
-              style: const TextStyle(
-                color: AppColors.textSecondary,
-                fontSize: 13,
-                fontFamily: 'Inter',
-              ),
-            ),
-            const SizedBox(width: 12),
-            const Icon(
-              Icons.near_me_rounded,
-              color: AppColors.textFaint,
-              size: 13,
-            ),
-            const SizedBox(width: 4),
-            Text(
-              '${latitude.toStringAsFixed(4)}, ${longitude.toStringAsFixed(4)}',
-              style: const TextStyle(
-                color: AppColors.textFaint,
-                fontSize: 11.5,
-                fontFamily: 'Inter',
-              ),
-            ),
-          ],
-        ),
-        const SizedBox(height: 12),
-        Text(
-          description,
-          style: const TextStyle(
-            color: AppColors.textSecondary,
-            fontSize: 14,
-            height: 1.55,
-            fontFamily: 'Inter',
           ),
-        ),
-        if (bestTime != null) ...[
-          const SizedBox(height: 14),
-          Row(
-            children: [
-              const Icon(
-                Icons.wb_sunny_outlined,
-                color: AppColors.catSunset,
-                size: 15,
-              ),
-              const SizedBox(width: 6),
-              Text(
-                'Best shot: $bestTime',
-                style: const TextStyle(
-                  color: AppColors.textPrimary,
-                  fontSize: 12.5,
-                  fontWeight: FontWeight.w600,
-                  fontFamily: 'Inter',
-                ),
-              ),
-            ],
+          const SizedBox(height: 6),
+          Text(
+            'Address lookup failed — type the city yourself.',
+            style: theme.bodySmall?.copyWith(color: AppColors.danger),
           ),
+        ] else if (city.isNotEmpty) ...[
+          const SizedBox(height: 10),
+          Text('City: $city', style: theme.bodySmall),
         ],
-        if (tags.isNotEmpty) ...[
-          const SizedBox(height: 14),
-          Wrap(
-            spacing: 7,
-            runSpacing: 7,
-            children: [
-              for (final tag in tags)
-                Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 10,
-                    vertical: 5,
-                  ),
-                  decoration: BoxDecoration(
-                    color: AppColors.surfaceElevated,
-                    borderRadius: BorderRadius.circular(999),
-                    border: Border.all(color: AppColors.hairline),
-                  ),
-                  child: Text(
-                    '#$tag',
-                    style: const TextStyle(
-                      color: AppColors.textSecondary,
-                      fontSize: 11.5,
-                      fontFamily: 'Inter',
-                    ),
-                  ),
-                ),
-            ],
-          ),
-        ],
-        const SizedBox(height: 18),
-        Text(
-          AppInfo.backendConfigured
-              ? 'Your spot will appear on the map for everyone to discover.'
-              : 'Demo mode: this spot is kept in memory and resets when the app '
-                    'closes, because no backend is configured.',
-          style: const TextStyle(
-            color: AppColors.textFaint,
-            fontSize: 12,
-            height: 1.45,
-            fontFamily: 'Inter',
-          ),
-        ),
-        const SizedBox(height: 6),
-        Text(
-          AppInfo.backendConfigured
-              ? 'The photo is uploaded with the spot.'
-              : 'The photo is not uploaded anywhere in demo mode.',
-          style: const TextStyle(
-            color: AppColors.textFaint,
-            fontSize: 11.5,
-            fontFamily: 'Inter',
-          ),
-        ),
       ],
     );
   }
