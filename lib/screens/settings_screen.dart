@@ -111,9 +111,10 @@ class SettingsScreen extends StatelessWidget {
                 _ActionRow(
                   icon: Icons.location_on_outlined,
                   label: 'Manage location',
-                  onTap: () => showLocationRecovery(
+                  onTap: () => runLocationFlow(
                     context,
-                    app.lastLocationOutcome ?? LocationOutcome.failed,
+                    explain: false,
+                    appState: app,
                   ),
                 ),
               ],
@@ -140,7 +141,8 @@ class SettingsScreen extends StatelessWidget {
   }
 
   static String _locationStatus(LocationOutcome? outcome) => switch (outcome) {
-        LocationOutcome.granted || null => 'Ready',
+        LocationOutcome.granted => 'Ready',
+        null => 'Not requested yet',
         LocationOutcome.servicesOff => 'Services off',
         LocationOutcome.blocked => 'Blocked',
         LocationOutcome.denied => 'Not granted',
@@ -157,7 +159,9 @@ class SettingsScreen extends StatelessWidget {
       );
       return;
     }
-    await showUpdateSheet(context, release);
+    final action = await showUpdateSheet(context, release);
+    if (!context.mounted) return;
+    await handleUpdateAction(context, release, action);
   }
 
   Future<void> _openRepository(BuildContext context) async {

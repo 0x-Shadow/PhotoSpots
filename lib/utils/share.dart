@@ -16,11 +16,12 @@ Future<void> shareLocationLink(
     'https://www.google.com/maps/search/?api=1&query=$lat,$lng',
   );
   final messenger = ScaffoldMessenger.maybeOf(context);
+  final text = title == 'My location'
+      ? 'My location: $lat, $lng'
+      : '$title — $lat, $lng';
   var shared = false;
   try {
-    await SharePlus.instance.share(
-      ShareParams(text: '$title — $lat, $lng', uri: uri),
-    );
+    await SharePlus.instance.share(ShareParams(text: text, uri: uri));
     shared = true;
   } catch (_) {
     // Fall through to the clipboard.

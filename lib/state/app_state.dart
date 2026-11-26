@@ -272,6 +272,13 @@ class AppState extends ChangeNotifier {
     }
   }
 
+  /// Remembers an outcome reported by a caller (e.g. Settings) so every screen
+  /// reads the same status.
+  void recordLocationOutcome(LocationOutcome outcome) {
+    _lastOutcome = outcome;
+    _notify();
+  }
+
   /// Called when the app returns from the background. If the user granted
   /// permission in system settings, pick up the fix without asking again.
   void onAppResumed() {

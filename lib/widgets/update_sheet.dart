@@ -2,6 +2,7 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:path_provider/path_provider.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../app_info.dart';
 import '../services/apk_installer.dart';
@@ -35,6 +36,41 @@ Future<UpdateAction?> showUpdateSheet(
     ),
     builder: (_) => UpdateSheet(release: release, canInstall: canInstall),
   );
+}
+
+/// Handles the sheet's non-install result so the launch gate and Settings
+/// behave identically. [opener] is injectable for tests.
+Future<void> handleUpdateAction(
+  BuildContext context,
+  ReleaseInfo release,
+  UpdateAction? action, {
+  Future<bool> Function(Uri uri, LaunchMode mode)? opener,
+}) async {
+  if (action != UpdateAction.openPage) return;
+  final messenger = ScaffoldMessenger.maybeOf(context);
+  final open = opener ?? launchUrl;
+  var opened = false;
+  try {
+    opened = await open(release.pageUrl, LaunchMode.externalApplication);
+  } catch (_) {
+    opened = false;
+  }
+  if (!opened) {
+    try {
+      opened = await open(release.pageUrl, LaunchMode.inAppWebView);
+    } catch (_) {
+      opened = false;
+    }
+  }
+  if (!opened) {
+    messenger?.showSnackBar(
+      SnackBar(
+        content: SelectableText(
+          'Open ${release.pageUrl} to download version ${release.version}.',
+        ),
+      ),
+    );
+  }
 }
 
 /// Presents an available release and drives the download/install flow.
@@ -349,6 +385,7 @@ class _UpdateSheetState extends State<UpdateSheet> {
             : 'Update now',
         onTap: _startUpdate,
         child: Container(
+          constraints: const BoxConstraints(minHeight: 44),
           padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
           decoration: BoxDecoration(
             color: AppColors.action,

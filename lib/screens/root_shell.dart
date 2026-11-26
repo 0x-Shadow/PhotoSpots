@@ -291,7 +291,7 @@ class _AddAction extends StatelessWidget {
       semanticLabel: 'Add a spot',
       onTap: onTap,
       child: const SizedBox(
-        height: AppLayout.minTapTarget,
+        height: 52,
         child: Center(
           child: SizedBox(
             width: 52,
