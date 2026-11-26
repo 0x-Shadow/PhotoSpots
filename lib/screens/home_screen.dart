@@ -9,6 +9,7 @@ import '../utils/format.dart';
 import '../widgets/place_card.dart';
 import '../widgets/state_views.dart';
 import 'categories_screen.dart';
+import 'map_screen.dart';
 import 'search_screen.dart';
 import 'submit_screen.dart';
 
@@ -20,6 +21,12 @@ class HomeScreen extends StatelessWidget {
     final state = context.watch<AppState>();
     final ranked = state.rankedSpots;
     final trending = ranked.isNotEmpty ? ranked.first : null;
+    final goldenHourSpots = ranked.where(
+      (spot) => spot.bestTime?.toLowerCase().contains('golden') ?? false,
+    );
+    final goldenHourSpot = goldenHourSpots.isEmpty
+        ? trending
+        : goldenHourSpots.first;
 
     final nearby = state.nearby(state.referenceLocation);
     final picks = (nearby.isNotEmpty ? nearby : ranked).take(8).toList();
@@ -50,7 +57,7 @@ class HomeScreen extends StatelessWidget {
                         ),
                         const SizedBox(height: 8),
                         const Text(
-                          'Explore the\nbest places.',
+                          'Find a place\nworth going out for.',
                           style: TextStyle(
                             color: AppColors.textPrimary,
                             fontSize: 33,
@@ -66,8 +73,9 @@ class HomeScreen extends StatelessWidget {
                   const SizedBox(width: 12),
                   PressButton(
                     semanticLabel: 'Search photo spots',
-                    onTap: () => Navigator.of(context)
-                        .push(AppMotion.slideUp(const SearchScreen())),
+                    onTap: () =>
+                        Navigator.of(context)
+                            .push(AppMotion.slideUp(const SearchScreen())),
                     child: Container(
                       width: 44,
                       height: 44,
@@ -76,13 +84,19 @@ class HomeScreen extends StatelessWidget {
                         shape: BoxShape.circle,
                         border: Border.all(color: AppColors.hairline),
                       ),
-                      child: const Icon(Icons.search_rounded,
-                          color: AppColors.textPrimary, size: 21),
+                      child: const Icon(
+                        Icons.search_rounded,
+                        color: AppColors.textPrimary,
+                        size: 21,
+                      ),
                     ),
                   ),
                 ],
               ),
-              const SizedBox(height: 24),
+              const SizedBox(height: 20),
+
+              const _CommunityPromise(),
+              const SizedBox(height: 26),
 
               if (trending == null)
                 Padding(
@@ -90,14 +104,34 @@ class HomeScreen extends StatelessWidget {
                   child: EmptyState(
                     icon: Icons.explore_rounded,
                     title: 'No spots yet',
-                    message:
-                        'Add the first photo spot and start the map for everyone.',
+                    message: 'Add the first photo spot and start the map for everyone.',
                     actionLabel: 'Add a spot',
-                    onAction: () => Navigator.of(context)
-                        .push(AppMotion.slideUpModal(const SubmitScreen())),
+                    onAction: () =>
+                        Navigator.of(context)
+                            .push(AppMotion.slideUpModal(const SubmitScreen())),
                   ),
                 )
               else ...[
+                _SectionHeader(
+                  title: 'Tonight’s golden hour',
+                  actionLabel: 'See map',
+                  onAction: () =>
+                      Navigator.of(context)
+                          .push(AppMotion.slideUp(const MapScreen())),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  goldenHourSpot == null
+                      ? 'Places shared by people who know the view.'
+                      : 'Best light near ${goldenHourSpot.city} — saved by the community.',
+                  style: const TextStyle(
+                    color: AppColors.textSecondary,
+                    fontSize: 13,
+                    height: 1.35,
+                    fontFamily: 'Inter',
+                  ),
+                ),
+                const SizedBox(height: 14),
                 RevealItem(
                   index: 0,
                   total: 8,
@@ -110,23 +144,24 @@ class HomeScreen extends StatelessWidget {
 
                 _SectionHeader(
                   title: 'Categories',
-                  onAction: () => Navigator.of(context)
-                      .push(AppMotion.slideUp(const CategoriesScreen())),
+                  onAction: () =>
+                      Navigator.of(context)
+                          .push(AppMotion.slideUp(const CategoriesScreen())),
                 ),
                 const SizedBox(height: 14),
                 _CategoryRow(
-                  onTap: (tag) => Navigator.of(context).push(
-                    AppMotion.slideUp(CategoriesScreen(filterTag: tag)),
-                  ),
+                  onTap: (tag) => Navigator.of(
+                    context,
+                  ).push(AppMotion.slideUp(CategoriesScreen(filterTag: tag))),
                 ),
                 const SizedBox(height: 26),
 
                 _SectionHeader(
-                  title: 'Top Picks Nearby',
+                  title: state.hasUserLocation
+                      ? 'Good near you'
+                      : 'Community favorites',
                   onAction: () => Navigator.of(context).push(
-                    AppMotion.slideUp(
-                      const CategoriesScreen(allOnly: true),
-                    ),
+                    AppMotion.slideUp(const CategoriesScreen(allOnly: true)),
                   ),
                 ),
                 const SizedBox(height: 14),
@@ -169,10 +204,15 @@ class HomeScreen extends StatelessWidget {
 }
 
 class _SectionHeader extends StatelessWidget {
-  const _SectionHeader({required this.title, required this.onAction});
+  const _SectionHeader({
+    required this.title,
+    required this.onAction,
+    this.actionLabel = 'See all',
+  });
 
   final String title;
   final VoidCallback onAction;
+  final String actionLabel;
 
   @override
   Widget build(BuildContext context) {
@@ -192,18 +232,17 @@ class _SectionHeader extends StatelessWidget {
         ),
         Semantics(
           button: true,
-          label: 'See all $title',
-          child: InkWell(
+          label: '$actionLabel $title',
+          child: PressButton(
             onTap: onAction,
-            borderRadius: BorderRadius.circular(10),
             child: Container(
               constraints: const BoxConstraints(minHeight: 40),
               padding: const EdgeInsets.symmetric(horizontal: 4),
-              child: const Row(
+              child: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   Text(
-                    'See all',
+                    actionLabel,
                     style: TextStyle(
                       color: AppColors.textSecondary,
                       fontSize: 13,
@@ -211,8 +250,11 @@ class _SectionHeader extends StatelessWidget {
                       fontFamily: 'Inter',
                     ),
                   ),
-                  Icon(Icons.arrow_forward_rounded,
-                      color: AppColors.textSecondary, size: 15),
+                  Icon(
+                    Icons.arrow_forward_rounded,
+                    color: AppColors.textSecondary,
+                    size: 15,
+                  ),
                 ],
               ),
             ),
@@ -231,22 +273,91 @@ class _CategoryRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final categories = spotCategories.take(4).toList();
-    return Row(
-      children: [
-        for (var i = 0; i < categories.length; i++) ...[
-          if (i > 0) const SizedBox(width: 10),
-          Expanded(
-            child: RevealItem(
-              index: i,
-              total: categories.length,
-              child: _CategoryTile(
-                category: categories[i],
-                onTap: () => onTap(categories[i].tag),
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final columns = constraints.maxWidth >= 560 ? 4 : 2;
+        final tileWidth =
+            (constraints.maxWidth - ((columns - 1) * 10)) / columns;
+        return Wrap(
+          spacing: 10,
+          runSpacing: 10,
+          children: [
+            for (var i = 0; i < categories.length; i++)
+              SizedBox(
+                width: tileWidth,
+                child: RevealItem(
+                  index: i,
+                  total: categories.length,
+                  child: _CategoryTile(
+                    category: categories[i],
+                    onTap: () => onTap(categories[i].tag),
+                  ),
+                ),
+              ),
+          ],
+        );
+      },
+    );
+  }
+}
+
+class _CommunityPromise extends StatelessWidget {
+  const _CommunityPromise();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: AppColors.hairline),
+      ),
+      child: const Row(
+        children: [
+          SizedBox(
+            width: 36,
+            height: 36,
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                color: AppColors.accentSoft,
+                shape: BoxShape.circle,
+              ),
+              child: Icon(
+                Icons.people_alt_rounded,
+                color: AppColors.accent,
+                size: 18,
               ),
             ),
           ),
+          SizedBox(width: 11),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Places people actually recommend',
+                  style: TextStyle(
+                    color: AppColors.textPrimary,
+                    fontSize: 13,
+                    fontWeight: FontWeight.w800,
+                    fontFamily: 'Inter',
+                  ),
+                ),
+                SizedBox(height: 2),
+                Text(
+                  'Save the view. Share the secret, thoughtfully.',
+                  style: TextStyle(
+                    color: AppColors.textSecondary,
+                    fontSize: 11.5,
+                    fontFamily: 'Inter',
+                  ),
+                ),
+              ],
+            ),
+          ),
         ],
-      ],
+      ),
     );
   }
 }

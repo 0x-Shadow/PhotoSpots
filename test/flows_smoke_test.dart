@@ -5,6 +5,7 @@ import 'package:photospot/screens/root_shell.dart';
 import 'package:photospot/state/app_state.dart';
 import 'package:photospot/state/settings_state.dart';
 import 'package:photospot/theme/app_theme.dart';
+import 'package:photospot/widgets/place_card.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -19,8 +20,9 @@ void main() {
     SharedPreferences.setMockInitialValues({});
   });
 
-  testWidgets('detail, categories, submit, profile and plan flows lay out',
-      (tester) async {
+  testWidgets('detail, categories, submit, profile and plan flows lay out', (
+    tester,
+  ) async {
     tester.view.physicalSize = const Size(360, 780);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.resetPhysicalSize);
@@ -41,6 +43,11 @@ void main() {
     await tester.pump(const Duration(milliseconds: 700));
 
     // Categories.
+    await tester.scrollUntilVisible(
+      find.text('Categories'),
+      220,
+      scrollable: find.byType(Scrollable).first,
+    );
     await tester.tap(find.text('See all').first);
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 600));
@@ -51,7 +58,9 @@ void main() {
     await tester.pump(const Duration(milliseconds: 600));
 
     // Spot detail via the trending hero.
-    await tester.tap(find.byType(Hero).first);
+    await tester.ensureVisible(find.byType(TrendingCard));
+    await tester.pump();
+    await tester.tap(find.byType(TrendingCard));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 700));
     expect(find.text('Get Directions'), findsOneWidget);

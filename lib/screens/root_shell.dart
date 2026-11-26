@@ -22,7 +22,6 @@ class RootShell extends StatefulWidget {
 class _RootShellState extends State<RootShell>
     with SingleTickerProviderStateMixin {
   int _index = 0;
-  bool _locationRequested = false;
 
   late final AnimationController _tabFadeController;
   late final Animation<double> _tabFade;
@@ -46,19 +45,10 @@ class _RootShellState extends State<RootShell>
       parent: _tabFadeController,
       curve: AppMotion.easeOut,
     );
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!_locationRequested && mounted) {
-        _locationRequested = true;
-        // Ask once at startup; harmless if denied.
-        context.read<AppState>().requestLocation();
-      }
-    });
   }
 
   void _openSubmit() {
-    Navigator.of(context).push(
-      AppMotion.slideUpModal(const SubmitScreen()),
-    );
+    Navigator.of(context).push(AppMotion.slideUpModal(const SubmitScreen()));
   }
 
   /// Switches tab and replays a short fade so the change does not feel abrupt.
@@ -103,10 +93,7 @@ class _RootShellState extends State<RootShell>
           return Scaffold(
             body: Row(
               children: [
-                _SideRail(
-                  index: _index,
-                  onChanged: _selectTab,
-                ),
+                _SideRail(index: _index, onChanged: _selectTab),
                 const VerticalDivider(width: 1, color: AppColors.hairline),
                 Expanded(
                   child: FadeTransition(
@@ -127,10 +114,7 @@ class _RootShellState extends State<RootShell>
             opacity: _tabFade,
             child: IndexedStack(index: _index, children: _screens),
           ),
-          bottomNavigationBar: _NavBar(
-            index: _index,
-            onChanged: _selectTab,
-          ),
+          bottomNavigationBar: _NavBar(index: _index, onChanged: _selectTab),
           floatingActionButton: (_index == 0 || _index == 1)
               ? _SubmitFab(onTap: _openSubmit)
               : null,
@@ -153,12 +137,12 @@ class _NavBar extends StatelessWidget {
     (
       icon: Icons.bookmark_outline_rounded,
       active: Icons.bookmark_rounded,
-      label: 'Saved'
+      label: 'Saved',
     ),
     (
       icon: Icons.person_outline_rounded,
       active: Icons.person_rounded,
-      label: 'Profile'
+      label: 'Profile',
     ),
   ];
 
@@ -255,10 +239,14 @@ class _SideRail extends StatelessWidget {
       onDestinationSelected: onChanged,
       labelType: NavigationRailLabelType.all,
       indicatorColor: const Color(0x1AFFFFFF),
-      selectedIconTheme:
-          const IconThemeData(color: AppColors.textPrimary, size: 23),
-      unselectedIconTheme:
-          const IconThemeData(color: AppColors.textFaint, size: 23),
+      selectedIconTheme: const IconThemeData(
+        color: AppColors.textPrimary,
+        size: 23,
+      ),
+      unselectedIconTheme: const IconThemeData(
+        color: AppColors.textFaint,
+        size: 23,
+      ),
       selectedLabelTextStyle: const TextStyle(
         color: AppColors.textPrimary,
         fontSize: 11,
@@ -337,8 +325,11 @@ class _SubmitFab extends StatelessWidget {
               ),
             ],
           ),
-          child: const Icon(Icons.add_rounded,
-              color: AppColors.onAction, size: 28),
+          child: const Icon(
+            Icons.add_rounded,
+            color: AppColors.onAction,
+            size: 28,
+          ),
         ),
       ),
     );

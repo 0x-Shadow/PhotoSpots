@@ -14,7 +14,8 @@ import '../theme/app_animations.dart';
 import '../theme/app_theme.dart';
 import '../utils/format.dart';
 
-/// Four-step submit flow: photo, details, pin, review.
+/// A deliberately short publishing flow: choose the shot, then add just
+/// enough context to make it useful.
 class SubmitScreen extends StatefulWidget {
   const SubmitScreen({super.key});
 
@@ -35,12 +36,7 @@ class _SubmitScreenState extends State<SubmitScreen> {
   Uint8List? _photoBytes;
   bool _submitting = false;
 
-  static const _stepTitles = [
-    'Add a photo',
-    'Tell us about it',
-    'Drop the pin',
-    'Review',
-  ];
+  static const _stepTitles = ['Choose photo', 'Share the spot'];
 
   static const _tagOptions = [
     'skyline',
@@ -71,13 +67,31 @@ class _SubmitScreenState extends State<SubmitScreen> {
     super.dispose();
   }
 
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final state = context.read<AppState>();
+      _pinned = state.referenceLocation;
+      if (!state.hasUserLocation) {
+        state.requestLocation().then((granted) {
+          if (mounted && granted) {
+            setState(
+              () => _pinned = context.read<AppState>().referenceLocation,
+            );
+          }
+        });
+      }
+    });
+  }
+
   bool get _canProceed {
     switch (_step) {
       case 0:
         return _photoBytes != null;
       case 1:
         return _titleController.text.trim().isNotEmpty &&
-            _descController.text.trim().length >= 10 &&
             _cityController.text.trim().isNotEmpty;
       default:
         return true;
@@ -95,7 +109,12 @@ class _SubmitScreenState extends State<SubmitScreen> {
       if (picked == null) return;
       final bytes = await picked.readAsBytes();
       if (!mounted) return;
-      setState(() => _photoBytes = bytes);
+      setState(() {
+        _photoBytes = bytes;
+        // The system picker is already a deliberate decision; do not ask for
+        // another confirmation tap before continuing.
+        if (_step == 0) _step = 1;
+      });
     } catch (_) {
       messenger.showSnackBar(
         SnackBar(
@@ -110,7 +129,7 @@ class _SubmitScreenState extends State<SubmitScreen> {
   }
 
   Future<void> _next() async {
-    if (_step == 3) {
+    if (_step == 1) {
       await _publish();
       return;
     }
@@ -131,14 +150,16 @@ class _SubmitScreenState extends State<SubmitScreen> {
 
     try {
       await context.read<AppState>().submitSpot(
-            title: _titleController.text.trim(),
-            description: _descController.text.trim(),
-            location: _pinned,
-            city: _cityController.text.trim(),
-            tags: _tags.toList(),
-            bestTime: _bestTime,
-            photoBytes: _photoBytes,
-          );
+        title: _titleController.text.trim(),
+        description: _descController.text.trim().isEmpty
+            ? 'A photo spot shared by the findr community.'
+            : _descController.text.trim(),
+        location: _pinned,
+        city: _cityController.text.trim(),
+        tags: _tags.toList(),
+        bestTime: _bestTime,
+        photoBytes: _photoBytes,
+      );
       if (!mounted) return;
       navigator.pop();
       messenger.showSnackBar(
@@ -246,22 +267,8 @@ class _SubmitScreenState extends State<SubmitScreen> {
               ..addAll(value);
           }),
         );
-      case 2:
-        return _LocationStep(
-          pinned: _pinned,
-          onPinMoved: (value) => setState(() => _pinned = value),
-        );
       default:
-        return _ReviewStep(
-          photoBytes: _photoBytes,
-          title: _titleController.text.trim(),
-          description: _descController.text.trim(),
-          city: _cityController.text.trim(),
-          bestTime: _bestTime,
-          tags: _tags.toList(),
-          latitude: _pinned.latitude,
-          longitude: _pinned.longitude,
-        );
+        return const SizedBox.shrink();
     }
   }
 }
@@ -306,11 +313,11 @@ class _ProgressBar extends StatelessWidget {
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: TextStyle(
-                      color:
-                          i <= step ? AppColors.textPrimary : AppColors.textFaint,
+                      color: i <= step
+                          ? AppColors.textPrimary
+                          : AppColors.textFaint,
                       fontSize: 10.5,
-                      fontWeight:
-                          i <= step ? FontWeight.w700 : FontWeight.w500,
+                      fontWeight: i <= step ? FontWeight.w700 : FontWeight.w500,
                       fontFamily: 'Inter',
                     ),
                   ),
@@ -379,15 +386,13 @@ class _BottomBar extends StatelessWidget {
             Expanded(
               flex: step > 0 ? 2 : 1,
               child: PressButton(
-                semanticLabel: step == 3 ? 'Publish spot' : 'Next step',
+                semanticLabel: step == 1 ? 'Publish spot' : 'Next step',
                 enabled: enabled,
                 onTap: onNext,
                 child: Container(
                   height: 52,
                   decoration: BoxDecoration(
-                    color: enabled
-                        ? AppColors.action
-                        : const Color(0x1AFFFFFF),
+                    color: enabled ? AppColors.action : const Color(0x1AFFFFFF),
                     borderRadius: BorderRadius.circular(14),
                   ),
                   alignment: Alignment.center,
@@ -401,7 +406,7 @@ class _BottomBar extends StatelessWidget {
                           ),
                         )
                       : Text(
-                          step == 3 ? 'Publish' : 'Next',
+                          step == 1 ? 'Publish spot' : 'Next',
                           style: TextStyle(
                             color: enabled
                                 ? AppColors.onAction
@@ -475,8 +480,11 @@ class _PhotoStep extends StatelessWidget {
                 ? Column(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
-                      const Icon(Icons.add_a_photo_rounded,
-                          color: AppColors.textSecondary, size: 42),
+                      const Icon(
+                        Icons.add_a_photo_rounded,
+                        color: AppColors.textSecondary,
+                        size: 42,
+                      ),
                       const SizedBox(height: 12),
                       const Text(
                         'Add your best shot',
@@ -535,8 +543,11 @@ class _PhotoStep extends StatelessWidget {
                                 color: Colors.black54,
                                 shape: BoxShape.circle,
                               ),
-                              child: const Icon(Icons.close_rounded,
-                                  color: Colors.white, size: 19),
+                              child: const Icon(
+                                Icons.close_rounded,
+                                color: Colors.white,
+                                size: 19,
+                              ),
                             ),
                           ),
                         ),
@@ -546,7 +557,9 @@ class _PhotoStep extends StatelessWidget {
                         left: 12,
                         child: Container(
                           padding: const EdgeInsets.symmetric(
-                              horizontal: 10, vertical: 5),
+                            horizontal: 10,
+                            vertical: 5,
+                          ),
                           decoration: BoxDecoration(
                             color: Colors.black54,
                             borderRadius: BorderRadius.circular(999),
@@ -571,9 +584,7 @@ class _PhotoStep extends StatelessWidget {
               ? 'A photo is required to continue'
               : 'Looking good — continue when ready.',
           style: TextStyle(
-            color: photoBytes == null
-                ? AppColors.textFaint
-                : AppColors.success,
+            color: photoBytes == null ? AppColors.textFaint : AppColors.success,
             fontSize: 12.5,
             fontWeight: FontWeight.w600,
             fontFamily: 'Inter',
@@ -687,7 +698,7 @@ class _DetailsStepState extends State<_DetailsStep> {
           ),
         ),
         const SizedBox(height: 18),
-        const _FieldLabel('What makes it special?'),
+        const _FieldLabel('A tip for visitors (optional)'),
         const SizedBox(height: 8),
         TextFormField(
           controller: widget.descController,
@@ -701,9 +712,9 @@ class _DetailsStepState extends State<_DetailsStep> {
         ),
         const SizedBox(height: 6),
         Text(
-          widget.descController.text.trim().length < 10
-              ? 'At least 10 characters.'
-              : 'Nice — that is enough detail.',
+          widget.descController.text.trim().isEmpty
+              ? 'A short note helps others find the exact angle.'
+              : 'Nice — that gives people useful context.',
           style: const TextStyle(
             color: AppColors.textFaint,
             fontSize: 11.5,
@@ -902,7 +913,8 @@ class _LocationStepState extends State<_LocationStep> {
                   maxZoom: 18,
                   backgroundColor: AppColors.mapBackground,
                   interactionOptions: const InteractionOptions(
-                    flags: InteractiveFlag.drag |
+                    flags:
+                        InteractiveFlag.drag |
                         InteractiveFlag.pinchZoom |
                         InteractiveFlag.doubleTapZoom |
                         InteractiveFlag.flingAnimation,
@@ -918,8 +930,7 @@ class _LocationStepState extends State<_LocationStep> {
                 ),
                 children: [
                   TileLayer(
-                    urlTemplate:
-                        'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
+                    urlTemplate: 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
                     subdomains: const ['a', 'b', 'c', 'd'],
                     userAgentPackageName: 'com.photospot.app',
                     maxZoom: 18,
@@ -961,11 +972,17 @@ class _LocationStepState extends State<_LocationStep> {
                           ),
                         ],
                       ),
-                      child: const Icon(Icons.photo_camera_rounded,
-                          color: AppColors.onAction, size: 21),
+                      child: const Icon(
+                        Icons.photo_camera_rounded,
+                        color: AppColors.onAction,
+                        size: 21,
+                      ),
                     ),
-                    const Icon(Icons.arrow_drop_down_rounded,
-                        color: AppColors.textPrimary, size: 28),
+                    const Icon(
+                      Icons.arrow_drop_down_rounded,
+                      color: AppColors.textPrimary,
+                      size: 28,
+                    ),
                   ],
                 ),
               ),
@@ -1014,6 +1031,8 @@ class _LocationStepState extends State<_LocationStep> {
   }
 }
 
+// Kept as a ready-to-reuse preview surface for a future edit flow.
+// ignore: unused_element
 class _ReviewStep extends StatelessWidget {
   const _ReviewStep({
     required this.photoBytes,
@@ -1048,8 +1067,11 @@ class _ReviewStep extends StatelessWidget {
             child: photoBytes != null
                 ? Image.memory(photoBytes!, fit: BoxFit.cover)
                 : const Center(
-                    child: Icon(Icons.landscape_rounded,
-                        color: AppColors.textFaint, size: 40),
+                    child: Icon(
+                      Icons.landscape_rounded,
+                      color: AppColors.textFaint,
+                      size: 40,
+                    ),
                   ),
           ),
         ),
@@ -1067,8 +1089,11 @@ class _ReviewStep extends StatelessWidget {
         const SizedBox(height: 6),
         Row(
           children: [
-            const Icon(Icons.place_rounded,
-                color: AppColors.textSecondary, size: 14),
+            const Icon(
+              Icons.place_rounded,
+              color: AppColors.textSecondary,
+              size: 14,
+            ),
             const SizedBox(width: 4),
             Text(
               city,
@@ -1079,8 +1104,11 @@ class _ReviewStep extends StatelessWidget {
               ),
             ),
             const SizedBox(width: 12),
-            const Icon(Icons.near_me_rounded,
-                color: AppColors.textFaint, size: 13),
+            const Icon(
+              Icons.near_me_rounded,
+              color: AppColors.textFaint,
+              size: 13,
+            ),
             const SizedBox(width: 4),
             Text(
               '${latitude.toStringAsFixed(4)}, ${longitude.toStringAsFixed(4)}',
@@ -1106,8 +1134,11 @@ class _ReviewStep extends StatelessWidget {
           const SizedBox(height: 14),
           Row(
             children: [
-              const Icon(Icons.wb_sunny_outlined,
-                  color: AppColors.catSunset, size: 15),
+              const Icon(
+                Icons.wb_sunny_outlined,
+                color: AppColors.catSunset,
+                size: 15,
+              ),
               const SizedBox(width: 6),
               Text(
                 'Best shot: $bestTime',
@@ -1129,8 +1160,10 @@ class _ReviewStep extends StatelessWidget {
             children: [
               for (final tag in tags)
                 Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 10,
+                    vertical: 5,
+                  ),
                   decoration: BoxDecoration(
                     color: AppColors.surfaceElevated,
                     borderRadius: BorderRadius.circular(999),
@@ -1153,7 +1186,7 @@ class _ReviewStep extends StatelessWidget {
           AppInfo.backendConfigured
               ? 'Your spot will appear on the map for everyone to discover.'
               : 'Demo mode: this spot is kept in memory and resets when the app '
-                  'closes, because no backend is configured.',
+                    'closes, because no backend is configured.',
           style: const TextStyle(
             color: AppColors.textFaint,
             fontSize: 12,

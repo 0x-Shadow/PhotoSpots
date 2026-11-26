@@ -62,7 +62,7 @@ class SplashScreen extends StatelessWidget {
                   ),
                   const SizedBox(height: 12),
                   const Text(
-                    'Find your kind of place.',
+                    'The places worth stepping out for.',
                     textAlign: TextAlign.center,
                     style: TextStyle(
                       color: Color(0xE6FFFFFF),
@@ -70,6 +70,17 @@ class SplashScreen extends StatelessWidget {
                       fontWeight: FontWeight.w400,
                       fontFamily: 'Inter',
                     ),
+                  ),
+                  const SizedBox(height: 14),
+                  const Wrap(
+                    alignment: WrapAlignment.center,
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: [
+                      _WelcomeTag(label: 'Sunset views'),
+                      _WelcomeTag(label: 'Date nights'),
+                      _WelcomeTag(label: 'Hidden corners'),
+                    ],
                   ),
                   const Spacer(flex: 4),
                   PressButton(
@@ -97,8 +108,11 @@ class SplashScreen extends StatelessWidget {
                             ),
                           ),
                           SizedBox(width: 8),
-                          Icon(Icons.arrow_forward_rounded,
-                              color: Colors.white, size: 18),
+                          Icon(
+                            Icons.arrow_forward_rounded,
+                            color: Colors.white,
+                            size: 18,
+                          ),
                         ],
                       ),
                     ),
@@ -118,6 +132,33 @@ class SplashScreen extends StatelessWidget {
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+class _WelcomeTag extends StatelessWidget {
+  const _WelcomeTag({required this.label});
+
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: BoxDecoration(
+        color: const Color(0x1FFFFFFF),
+        border: Border.all(color: const Color(0x33FFFFFF)),
+        borderRadius: BorderRadius.circular(999),
+      ),
+      child: Text(
+        label,
+        style: const TextStyle(
+          color: Color(0xE6FFFFFF),
+          fontSize: 11.5,
+          fontWeight: FontWeight.w600,
+          fontFamily: 'Inter',
+        ),
       ),
     );
   }

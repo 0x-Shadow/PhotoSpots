@@ -94,9 +94,11 @@ class _MapScreenState extends State<MapScreen> {
     final origin = state.referenceLocation;
     switch (_sort) {
       case _MapSort.nearest:
-        list.sort((a, b) => state
-            .distanceKm(origin, a)
-            .compareTo(state.distanceKm(origin, b)));
+        list.sort(
+          (a, b) => state
+              .distanceKm(origin, a)
+              .compareTo(state.distanceKm(origin, b)),
+        );
       case _MapSort.topRated:
         list.sort((a, b) => b.rating.compareTo(a.rating));
       case _MapSort.saved:
@@ -135,14 +137,14 @@ class _MapScreenState extends State<MapScreen> {
           final active = value == _sort;
           return ListTile(
             onTap: () => Navigator.of(sheetContext).pop(value),
-            leading: Icon(icon,
-                color: active ? AppColors.accent : AppColors.textSecondary),
+            leading: Icon(
+              icon,
+              color: active ? AppColors.accent : AppColors.textSecondary,
+            ),
             title: Text(
               label,
               style: TextStyle(
-                color: active
-                    ? AppColors.textPrimary
-                    : AppColors.textSecondary,
+                color: active ? AppColors.textPrimary : AppColors.textSecondary,
                 fontFamily: 'Inter',
                 fontWeight: active ? FontWeight.w800 : FontWeight.w600,
               ),
@@ -173,10 +175,16 @@ class _MapScreenState extends State<MapScreen> {
                 ),
               ),
               option(_MapSort.nearest, Icons.near_me_rounded, 'Nearest'),
-              option(_MapSort.topRated, Icons.star_outline_rounded,
-                  'Top rated'),
-              option(_MapSort.saved, Icons.bookmark_outline_rounded,
-                  'Most saved'),
+              option(
+                _MapSort.topRated,
+                Icons.star_outline_rounded,
+                'Top rated',
+              ),
+              option(
+                _MapSort.saved,
+                Icons.bookmark_outline_rounded,
+                'Most saved',
+              ),
               const SizedBox(height: 12),
             ],
           ),
@@ -212,13 +220,14 @@ class _MapScreenState extends State<MapScreen> {
               maxZoom: 18,
               backgroundColor: AppColors.mapBackground,
               interactionOptions: const InteractionOptions(
-                flags: InteractiveFlag.drag |
+                flags:
+                    InteractiveFlag.drag |
                     InteractiveFlag.pinchZoom |
                     InteractiveFlag.doubleTapZoom |
                     InteractiveFlag.flingAnimation,
               ),
               onMapReady: () {
-                _mapReady = true;
+                setState(() => _mapReady = true);
                 if (state.hasUserLocation) {
                   _lastCenteredLocation = state.referenceLocation;
                   _moveMap(state.referenceLocation, 13.5);
@@ -230,58 +239,56 @@ class _MapScreenState extends State<MapScreen> {
               },
             ),
             children: [
-            TileLayer(
-              urlTemplate:
-                  'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
-              subdomains: const ['a', 'b', 'c', 'd'],
-              userAgentPackageName: 'com.photospot.app',
-              maxZoom: 18,
-              retinaMode: RetinaMode.isHighDensity(context),
-            ),
-            MarkerLayer(
-              markers: [
-                if (state.userLocation != null)
-                  Marker(
-                    point: origin,
-                    width: 22,
-                    height: 22,
-                    child: Container(
-                      decoration: BoxDecoration(
-                        color: const Color(0xFF3B82F6),
-                        shape: BoxShape.circle,
-                        border: Border.all(color: Colors.white, width: 3),
-                        boxShadow: const [
-                          BoxShadow(color: Color(0x66000000), blurRadius: 8),
-                        ],
+              TileLayer(
+                urlTemplate: 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
+                subdomains: const ['a', 'b', 'c', 'd'],
+                userAgentPackageName: 'com.photospot.app',
+                maxZoom: 18,
+                retinaMode: RetinaMode.isHighDensity(context),
+              ),
+              MarkerLayer(
+                markers: [
+                  if (state.userLocation != null)
+                    Marker(
+                      point: origin,
+                      width: 22,
+                      height: 22,
+                      child: Container(
+                        decoration: BoxDecoration(
+                          color: const Color(0xFF3B82F6),
+                          shape: BoxShape.circle,
+                          border: Border.all(color: Colors.white, width: 3),
+                          boxShadow: const [
+                            BoxShadow(color: Color(0x66000000), blurRadius: 8),
+                          ],
+                        ),
                       ),
                     ),
+                  for (final spot in spots)
+                    _spotMarker(
+                      spot: spot,
+                      selected: spot.id == _selectedId,
+                      showPhoto: settings.mapPhotoPins,
+                    ),
+                ],
+              ),
+              RichAttributionWidget(
+                alignment: AttributionAlignment.bottomLeft,
+                attributions: [
+                  TextSourceAttribution(
+                    'OpenStreetMap contributors',
+                    onTap: () => launchUrl(
+                      Uri.parse('https://www.openstreetmap.org/copyright'),
+                    ),
                   ),
-                for (final spot in spots)
-                  _spotMarker(
-                    spot: spot,
-                    selected: spot.id == _selectedId,
-                    showPhoto: settings.mapPhotoPins,
+                  TextSourceAttribution(
+                    'CARTO',
+                    onTap: () =>
+                        launchUrl(Uri.parse('https://carto.com/attributions')),
                   ),
-              ],
-            ),
-            RichAttributionWidget(
-              alignment: AttributionAlignment.bottomLeft,
-              attributions: [
-                TextSourceAttribution(
-                  'OpenStreetMap contributors',
-                  onTap: () => launchUrl(
-                    Uri.parse('https://www.openstreetmap.org/copyright'),
-                  ),
-                ),
-                TextSourceAttribution(
-                  'CARTO',
-                  onTap: () => launchUrl(
-                    Uri.parse('https://carto.com/attributions'),
-                  ),
-                ),
-              ],
-            ),
-          ],
+                ],
+              ),
+            ],
           ),
         ),
 
@@ -308,23 +315,31 @@ class _MapScreenState extends State<MapScreen> {
                         hintText: 'Search places…',
                         fillColor: const Color(0xF20F0F11),
                         contentPadding: const EdgeInsets.symmetric(
-                            horizontal: 14, vertical: 13),
-                        prefixIcon: const Icon(Icons.search_rounded,
-                            color: AppColors.textSecondary, size: 20),
+                          horizontal: 14,
+                          vertical: 13,
+                        ),
+                        prefixIcon: const Icon(
+                          Icons.search_rounded,
+                          color: AppColors.textSecondary,
+                          size: 20,
+                        ),
                         border: OutlineInputBorder(
                           borderRadius: BorderRadius.circular(14),
-                          borderSide:
-                              const BorderSide(color: AppColors.hairline),
+                          borderSide: const BorderSide(
+                            color: AppColors.hairline,
+                          ),
                         ),
                         enabledBorder: OutlineInputBorder(
                           borderRadius: BorderRadius.circular(14),
-                          borderSide:
-                              const BorderSide(color: AppColors.hairline),
+                          borderSide: const BorderSide(
+                            color: AppColors.hairline,
+                          ),
                         ),
                         focusedBorder: OutlineInputBorder(
                           borderRadius: BorderRadius.circular(14),
-                          borderSide:
-                              const BorderSide(color: AppColors.hairline),
+                          borderSide: const BorderSide(
+                            color: AppColors.hairline,
+                          ),
                         ),
                       ),
                     ),
@@ -341,11 +356,50 @@ class _MapScreenState extends State<MapScreen> {
                         borderRadius: BorderRadius.circular(14),
                         border: Border.all(color: AppColors.hairline),
                       ),
-                      child: const Icon(Icons.tune_rounded,
-                          color: AppColors.textPrimary, size: 20),
+                      child: const Icon(
+                        Icons.tune_rounded,
+                        color: AppColors.textPrimary,
+                        size: 20,
+                      ),
                     ),
                   ),
                 ],
+              ),
+            ),
+          ),
+        ),
+
+        // A short status moment prevents the map from feeling like an empty,
+        // unresponsive canvas while the first tiles arrive.
+        Positioned(
+          top: 116,
+          left: 0,
+          right: 0,
+          child: IgnorePointer(
+            child: AnimatedOpacity(
+              duration: AppMotion.instant,
+              opacity: _mapReady ? 0 : 1,
+              child: Center(
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 7,
+                  ),
+                  decoration: BoxDecoration(
+                    color: const Color(0xE61A1A1D),
+                    borderRadius: BorderRadius.circular(999),
+                    border: Border.all(color: AppColors.hairline),
+                  ),
+                  child: const Text(
+                    'Loading your map…',
+                    style: TextStyle(
+                      color: AppColors.textSecondary,
+                      fontFamily: 'Inter',
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
               ),
             ),
           ),
@@ -384,7 +438,9 @@ class _MapScreenState extends State<MapScreen> {
                       child: AnimatedContainer(
                         duration: AppMotion.instant,
                         padding: const EdgeInsets.symmetric(
-                            horizontal: 15, vertical: 7),
+                          horizontal: 15,
+                          vertical: 7,
+                        ),
                         decoration: BoxDecoration(
                           color: active
                               ? AppColors.action
@@ -403,8 +459,9 @@ class _MapScreenState extends State<MapScreen> {
                                 ? AppColors.onAction
                                 : AppColors.textSecondary,
                             fontSize: 12.5,
-                            fontWeight:
-                                active ? FontWeight.w800 : FontWeight.w600,
+                            fontWeight: active
+                                ? FontWeight.w800
+                                : FontWeight.w600,
                             fontFamily: 'Inter',
                           ),
                         ),
@@ -440,8 +497,11 @@ class _MapScreenState extends State<MapScreen> {
                       padding: EdgeInsets.all(14),
                       child: CircularProgressIndicator(strokeWidth: 2),
                     )
-                  : const Icon(Icons.my_location_rounded,
-                      color: AppColors.textPrimary, size: 21),
+                  : const Icon(
+                      Icons.my_location_rounded,
+                      color: AppColors.textPrimary,
+                      size: 21,
+                    ),
             ),
           ),
         ),
@@ -453,8 +513,10 @@ class _MapScreenState extends State<MapScreen> {
             right: 24,
             child: Center(
               child: Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 10,
+                ),
                 decoration: BoxDecoration(
                   color: AppColors.surfaceElevated,
                   borderRadius: BorderRadius.circular(999),
@@ -535,22 +597,33 @@ class _MapScreenState extends State<MapScreen> {
           _moveMap(spot.location, 15);
         },
         child: selected
-            ? Container(
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  border: Border.all(color: Colors.white, width: 3),
-                  boxShadow: const [
-                    BoxShadow(
-                      color: Color(0x80000000),
-                      blurRadius: 12,
-                      offset: Offset(0, 4),
-                    ),
-                  ],
-                ),
-                child: ClipOval(
-                  child: showPhoto
-                      ? SpotImage(photo: spot.coverPhoto, width: 52, height: 52)
-                      : _iconPin(style),
+            ? TweenAnimationBuilder<double>(
+                duration: AppMotion.layout,
+                curve: AppMotion.easeOut,
+                tween: Tween(begin: 0.72, end: 1.0),
+                builder: (context, scale, child) =>
+                    Transform.scale(scale: scale, child: child),
+                child: Container(
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    border: Border.all(color: Colors.white, width: 3),
+                    boxShadow: const [
+                      BoxShadow(
+                        color: Color(0x80000000),
+                        blurRadius: 12,
+                        offset: Offset(0, 4),
+                      ),
+                    ],
+                  ),
+                  child: ClipOval(
+                    child: showPhoto
+                        ? SpotImage(
+                            photo: spot.coverPhoto,
+                            width: 52,
+                            height: 52,
+                          )
+                        : _iconPin(style),
+                  ),
                 ),
               )
             : _iconPin(style),
@@ -608,11 +681,7 @@ class _PlaceCard extends StatelessWidget {
           children: [
             ClipRRect(
               borderRadius: BorderRadius.circular(12),
-              child: SpotImage(
-                photo: spot.coverPhoto,
-                width: 64,
-                height: 64,
-              ),
+              child: SpotImage(photo: spot.coverPhoto, width: 64, height: 64),
             ),
             const SizedBox(width: 11),
             Expanded(
@@ -635,8 +704,11 @@ class _PlaceCard extends StatelessWidget {
                   const SizedBox(height: 5),
                   Row(
                     children: [
-                      const Icon(Icons.star_rounded,
-                          color: AppColors.star, size: 13),
+                      const Icon(
+                        Icons.star_rounded,
+                        color: AppColors.star,
+                        size: 13,
+                      ),
                       const SizedBox(width: 3),
                       Text(
                         spot.rating.toStringAsFixed(1),
@@ -656,8 +728,11 @@ class _PlaceCard extends StatelessWidget {
                         ),
                       ),
                       const SizedBox(width: 8),
-                      const Icon(Icons.near_me_rounded,
-                          color: AppColors.textFaint, size: 12),
+                      const Icon(
+                        Icons.near_me_rounded,
+                        color: AppColors.textFaint,
+                        size: 12,
+                      ),
                       const SizedBox(width: 3),
                       Flexible(
                         child: Text(

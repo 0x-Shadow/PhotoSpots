@@ -30,6 +30,6 @@ void main() {
     await tester.pump(const Duration(milliseconds: 700));
 
     expect(find.byType(MaterialApp), findsOneWidget);
-    expect(find.text('Explore the\nbest places.'), findsOneWidget);
+    expect(find.text('Find a place\nworth going out for.'), findsOneWidget);
   });
 }

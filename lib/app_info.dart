@@ -11,7 +11,7 @@ class AppInfo {
   /// it in sync, otherwise the checked-in value is used.
   static const version = String.fromEnvironment(
     'APP_VERSION',
-    defaultValue: '1.0.4',
+    defaultValue: '1.0.11',
   );
 
   static const githubRepo = '0x-Shadow/PhotoSpots';
