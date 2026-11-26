@@ -44,18 +44,17 @@ compares it with `AppInfo.version`, and offers an upgrade when it is newer.
 To publish:
 
 1. Bump `version:` in `pubspec.yaml` **and** `AppInfo.version`.
-2. Commit, tag, and push (a tag push, not a plain branch push, is what creates
-   a release):
+2. Commit and push — either a branch push to `main` or a `v*` tag creates the
+   release for that version:
 
 ```bash
-git commit -am "Release v1.0.3"
-git tag v1.0.3
-git push origin main --tags
+git commit -am "Release v1.0.4"
+git push origin main          # or: git tag v1.0.4 && git push origin --tags
 ```
 
-The `Publish release` workflow creates the GitHub Release from the tag. The app
-does not need a signed build to *detect* the release; attach your built binaries
-to the release separately.
+The `Publish release` workflow builds the release APK and uploads it to the
+GitHub Release as `photospot-<version>.apk`, creating the release (and its tag)
+if it does not exist yet.
 
 > The releases endpoint must be **publicly readable**. A private repository
 > returns 404 to unauthenticated clients, and an app cannot safely carry a

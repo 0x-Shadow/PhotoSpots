@@ -1,12 +1,14 @@
 name: Publish release
 
-# Publishes a GitHub Release when a new app version lands on main, or when a
-# version tag is pushed. The app checks this channel on launch.
+# Publishes a GitHub Release (with an installable APK attached) when a new app
+# version lands on main, or when a version tag is pushed. The app checks this
+# channel on launch.
 #
 # Flow:
 #   1. Bump `version:` in pubspec.yaml and AppInfo.version.
 #   2. Commit and push to main (or push a `v*` tag).
-#   3. This job creates `v<version>` if it does not exist yet.
+#   3. This job builds the release APK, creates `v<version>` if it does not
+#      exist yet, and uploads the APK to that release.
 on:
   push:
     branches: [main]
@@ -14,6 +16,12 @@ on:
 
 permissions:
   contents: write
+
+# A push can match both the branch and the tag filters; run one at a time so the
+# release asset upload cannot race itself.
+concurrency:
+  group: release-${{ github.ref_name }}
+  cancel-in-progress: false
 
 jobs:
   release:
@@ -34,6 +42,32 @@ jobs:
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
           echo "Releasing $TAG"
 
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Build release APK
+        shell: bash
+        run: |
+          flutter pub get
+          flutter build apk --release \
+            --build-name="${TAG#v}" \
+            --build-number="${{ github.run_number }}"
+
+      - name: Rename APK
+        id: apk
+        shell: bash
+        run: |
+          OUT="photospot-${TAG#v}.apk"
+          cp build/app/outputs/flutter-apk/app-release.apk "$OUT"
+          echo "path=$OUT" >> "$GITHUB_OUTPUT"
+
       - name: Create release if needed
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -41,10 +75,18 @@ jobs:
         shell: bash
         run: |
           if gh release view "$TAG" >/dev/null 2>&1; then
-            echo "Release $TAG already exists; nothing to do."
-            exit 0
+            echo "Release $TAG already exists; will update its assets."
+          else
+            gh release create "$TAG" \
+              --title "$TAG" \
+              --generate-notes \
+              --latest
           fi
-          gh release create "$TAG" \
-            --title "$TAG" \
-            --generate-notes \
-            --latest
+
+      - name: Upload APK
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.version.outputs.tag }}
+          APK: ${{ steps.apk.outputs.path }}
+        shell: bash
+        run: gh release upload "$TAG" "$APK" --clobber
