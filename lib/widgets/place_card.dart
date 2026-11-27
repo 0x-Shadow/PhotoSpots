@@ -5,10 +5,13 @@ import '../models/spot.dart';
 import '../state/app_state.dart';
 import '../theme/app_theme.dart';
 import '../utils/actions.dart';
+import '../utils/categories.dart';
+import '../utils/format.dart';
 import '../utils/navigation.dart';
 import 'spot_image.dart';
 
-/// Full-width trending hero card from the reference.
+/// The golden-hour spotlight: photo, rating and trending pills, the name and
+/// city, and three quick facts along the bottom.
 class TrendingCard extends StatelessWidget {
   const TrendingCard({
     super.key,
@@ -21,139 +24,193 @@ class TrendingCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final category = categoryForSpot(spot);
+
     return Semantics(
       button: true,
       label: 'Open ${spot.title}',
       child: GestureDetector(
         onTap: () => openSpot(context, spot, heroTag: heroTag),
         child: Container(
-          height: 250,
           clipBehavior: Clip.antiAlias,
           decoration: BoxDecoration(
             color: AppColors.surface,
-            borderRadius: BorderRadius.circular(AppLayout.radiusCard),
+            borderRadius: BorderRadius.circular(22),
+            border: Border.all(color: const Color(0x1FFFFFFF)),
+            boxShadow: const [
+              BoxShadow(
+                color: Color(0x80000000),
+                blurRadius: 24,
+                spreadRadius: -8,
+                offset: Offset(0, 12),
+              ),
+            ],
           ),
-          child: Stack(
-            fit: StackFit.expand,
+          child: Column(
             children: [
-              Hero(
-                tag: heroTag,
-                child: SpotImage(
-                  photo: spot.coverPhoto,
-                  iconSize: 44,
-                ),
-              ),
-              const DecoratedBox(
-                decoration: BoxDecoration(
-                  gradient: LinearGradient(
-                    begin: Alignment.topCenter,
-                    end: Alignment.center,
-                    colors: [Color(0x66000000), Color(0x00000000)],
-                  ),
-                ),
-              ),
-              Positioned(
-                top: 14,
-                right: 14,
-                child: Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                  decoration: BoxDecoration(
-                    color: const Color(0xCC161618),
-                    borderRadius: BorderRadius.circular(999),
-                    border: Border.all(color: AppColors.hairline),
-                  ),
-                  child: const Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(Icons.local_fire_department_rounded,
-                          color: AppColors.trending, size: 14),
-                      SizedBox(width: 5),
-                      Text(
-                        'Trending',
-                        style: TextStyle(
-                          color: AppColors.textPrimary,
-                          fontSize: 12,
-                          fontWeight: FontWeight.w800,
+              Expanded(
+                child: Stack(
+                  fit: StackFit.expand,
+                  children: [
+                    Hero(
+                      tag: heroTag,
+                      child: SpotImage(photo: spot.coverPhoto, iconSize: 42),
+                    ),
+                    const DecoratedBox(
+                      decoration: BoxDecoration(
+                        gradient: LinearGradient(
+                          begin: Alignment.topCenter,
+                          end: Alignment.bottomCenter,
+                          colors: [Color(0x8C000000), Color(0x00000000)],
                         ),
                       ),
-                    ],
-                  ),
+                    ),
+                    Positioned(
+                      top: 12,
+                      left: 12,
+                      child: _Pill(
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            const Icon(
+                              Icons.star_rounded,
+                              color: AppColors.star,
+                              size: 14,
+                            ),
+                            const SizedBox(width: 5),
+                            Text(
+                              '${spot.rating.toStringAsFixed(1)} '
+                              '(${formatCount(spot.reviewCount)})',
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 12,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                    Positioned(
+                      top: 12,
+                      right: 12,
+                      child: _Pill(
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            const Icon(
+                              Icons.trending_up_rounded,
+                              color: AppColors.trending,
+                              size: 14,
+                            ),
+                            const SizedBox(width: 5),
+                            const Text(
+                              'Trending',
+                              style: TextStyle(
+                                color: Colors.white,
+                                fontSize: 12,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ],
                 ),
               ),
-              Positioned(
-                left: 18,
-                right: 18,
-                bottom: 18,
-                child: Row(
+              Padding(
+                padding: const EdgeInsets.fromLTRB(14, 11, 14, 11),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Expanded(
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
+                      Row(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Text(
-                            spot.title,
-                            maxLines: 2,
-                            overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(
-                              color: Colors.white,
-                              fontSize: 17,
-                              height: 1.2,
-                              fontWeight: FontWeight.w800,
-                              letterSpacing: -0.4,
-                            ),
-                          ),
-                          const SizedBox(height: 5),
-                          Row(
-                            children: [
-                              Flexible(
-                                child: Text(
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Row(
+                                  children: [
+                                    const Icon(
+                                      Icons.place_rounded,
+                                      color: AppColors.textPrimary,
+                                      size: 16,
+                                    ),
+                                    const SizedBox(width: 5),
+                                    Expanded(
+                                      child: Text(
+                                        spot.title,
+                                        maxLines: 2,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: const TextStyle(
+                                          color: AppColors.textPrimary,
+                                          fontSize: 17,
+                                          height: 1.2,
+                                          fontWeight: FontWeight.w800,
+                                          letterSpacing: -0.5,
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                                const SizedBox(height: 4),
+                                Text(
                                   spot.city,
                                   maxLines: 1,
                                   overflow: TextOverflow.ellipsis,
                                   style: const TextStyle(
-                                    color: Color(0xD9FFFFFF),
-                                    fontSize: 13,
-                                    fontWeight: FontWeight.w500,
+                                    color: AppColors.textSecondary,
+                                    fontSize: 12.5,
                                   ),
                                 ),
-                              ),
-                              const Text(
-                                '  ·  ',
-                                style: TextStyle(
-                                  color: Color(0xB3FFFFFF),
-                                  fontSize: 13,
-                                ),
-                              ),
-                              const Icon(Icons.star_rounded,
-                                  color: AppColors.star, size: 14),
-                              const SizedBox(width: 3),
-                              Text(
-                                spot.rating.toStringAsFixed(1),
-                                style: const TextStyle(
-                                  color: Colors.white,
-                                  fontSize: 13,
-                                  fontWeight: FontWeight.w800,
-                                ),
-                              ),
-                            ],
+                              ],
+                            ),
+                          ),
+                          const SizedBox(width: 10),
+                          Container(
+                            width: 42,
+                            height: 42,
+                            decoration: const BoxDecoration(
+                              color: Colors.white,
+                              shape: BoxShape.circle,
+                            ),
+                            child: const Icon(
+                              Icons.arrow_forward_rounded,
+                              color: AppColors.onAction,
+                              size: 20,
+                            ),
                           ),
                         ],
                       ),
-                    ),
-                    const SizedBox(width: 12),
-                    Container(
-                      width: 44,
-                      height: 44,
-                      decoration: const BoxDecoration(
-                        color: Colors.white,
-                        shape: BoxShape.circle,
+                      const SizedBox(height: 12),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: _MetaChip(
+                              icon: Icons.wb_sunny_rounded,
+                              label: spot.bestTime ?? 'Any light',
+                            ),
+                          ),
+                          const SizedBox(width: 6),
+                          Expanded(
+                            child: _MetaChip(
+                              icon: Icons.center_focus_strong_rounded,
+                              label: 'Best for ${category.label}',
+                            ),
+                          ),
+                          const SizedBox(width: 6),
+                          Expanded(
+                            child: _MetaChip(
+                              icon: Icons.photo_library_rounded,
+                              label: '${spot.galleryPhotos.length} photos',
+                            ),
+                          ),
+                        ],
                       ),
-                      child: const Icon(Icons.arrow_forward_rounded,
-                          color: AppColors.onAction, size: 21),
-                    ),
-                  ],
+                    ],
                 ),
               ),
             ],
@@ -164,7 +221,64 @@ class TrendingCard extends StatelessWidget {
   }
 }
 
-/// Compact photo card for the horizontal "Top Picks Nearby" rail.
+/// A dark capsule that stays readable over any photograph.
+class _Pill extends StatelessWidget {
+  const _Pill({required this.child});
+
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: BoxDecoration(
+        color: const Color(0xA6000000),
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: const Color(0x26FFFFFF)),
+      ),
+      child: child,
+    );
+  }
+}
+
+class _MetaChip extends StatelessWidget {
+  const _MetaChip({required this.icon, required this.label});
+
+  final IconData icon;
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      height: 34,
+      padding: const EdgeInsets.symmetric(horizontal: 8),
+      decoration: BoxDecoration(
+        color: const Color(0x14FFFFFF),
+        borderRadius: BorderRadius.circular(10),
+      ),
+      child: Row(
+        children: [
+          Icon(icon, color: AppColors.textSecondary, size: 12),
+          const SizedBox(width: 5),
+          Flexible(
+            child: Text(
+              label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(
+                color: AppColors.textSecondary,
+                fontSize: 10.5,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Compact photo card for the horizontal nearby rail.
 class TopPickCard extends StatelessWidget {
   const TopPickCard({
     super.key,
@@ -188,7 +302,8 @@ class TopPickCard extends StatelessWidget {
           clipBehavior: Clip.antiAlias,
           decoration: BoxDecoration(
             color: AppColors.surface,
-            borderRadius: BorderRadius.circular(16),
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(color: AppColors.hairline),
           ),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -201,9 +316,18 @@ class TopPickCard extends StatelessWidget {
                       tag: heroTag,
                       child: SpotImage(photo: spot.coverPhoto),
                     ),
+                    const DecoratedBox(
+                      decoration: BoxDecoration(
+                        gradient: LinearGradient(
+                          begin: Alignment.topCenter,
+                          end: Alignment.bottomCenter,
+                          colors: [Color(0x33000000), Color(0x00000000)],
+                        ),
+                      ),
+                    ),
                     Positioned(
-                      top: 6,
-                      right: 6,
+                      top: 4,
+                      right: 4,
                       child: IconButton(
                         onPressed: () => toggleSaveWithFeedback(context, spot),
                         tooltip: saved ? 'Remove from saved' : 'Save spot',
@@ -212,17 +336,17 @@ class TopPickCard extends StatelessWidget {
                           minHeight: AppLayout.minTapTarget,
                         ),
                         icon: Container(
-                          padding: const EdgeInsets.all(6),
+                          padding: const EdgeInsets.all(7),
                           decoration: const BoxDecoration(
-                            color: Color(0xB30A0A0B),
+                            color: Color(0x73000000),
                             shape: BoxShape.circle,
                           ),
                           child: Icon(
                             saved
-                                ? Icons.favorite_rounded
-                                : Icons.favorite_border_rounded,
-                            size: 16,
-                            color: saved ? AppColors.like : Colors.white,
+                                ? Icons.bookmark_rounded
+                                : Icons.bookmark_outline_rounded,
+                            size: 17,
+                            color: saved ? AppColors.star : Colors.white,
                           ),
                         ),
                       ),
@@ -246,7 +370,7 @@ class TopPickCard extends StatelessWidget {
                         letterSpacing: -0.3,
                       ),
                     ),
-                    const SizedBox(height: 4),
+                    const SizedBox(height: 5),
                     Row(
                       children: [
                         Flexible(
@@ -260,15 +384,12 @@ class TopPickCard extends StatelessWidget {
                             ),
                           ),
                         ),
-                        const Text(
-                          ' · ',
-                          style: TextStyle(
-                            color: AppColors.textFaint,
-                            fontSize: 12,
-                          ),
+                        const SizedBox(width: 6),
+                        const Icon(
+                          Icons.star_rounded,
+                          color: AppColors.star,
+                          size: 12,
                         ),
-                        const Icon(Icons.star_rounded,
-                            color: AppColors.star, size: 12),
                         const SizedBox(width: 2),
                         Text(
                           spot.rating.toStringAsFixed(1),

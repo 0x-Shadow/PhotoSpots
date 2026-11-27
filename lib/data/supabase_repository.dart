@@ -3,6 +3,7 @@ import 'dart:typed_data';
 import 'package:latlong2/latlong.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../models/comment.dart';
 import '../models/spot.dart';
 import 'spot_repository.dart';
 
@@ -45,10 +46,15 @@ class SupabaseSpotRepository implements SpotRepository {
   Future<void> _ensureProfile(String userId) async {
     if (!_profiledIds.add(userId)) return;
     try {
+      final metadataName =
+          _client.auth.currentUser?.userMetadata?['display_name'];
+      final name = (metadataName is String && metadataName.trim().isNotEmpty)
+          ? metadataName.trim()
+          : 'Explorer';
       await _client
           .from('profiles')
           .upsert(
-            {'id': userId, 'display_name': 'Explorer'},
+            {'id': userId, 'display_name': name},
             onConflict: 'id',
             ignoreDuplicates: true,
           );
@@ -98,6 +104,112 @@ class SupabaseSpotRepository implements SpotRepository {
         .map((row) => row['spot_id']?.toString() ?? '')
         .where((id) => id.isNotEmpty)
         .toSet();
+  }
+
+  @override
+  Future<Set<String>?> fetchLikedIds() async {
+    final userId = _client.auth.currentUser?.id;
+    if (userId == null) return null;
+
+    final response = await _client
+        .from('likes')
+        .select('spot_id')
+        .eq('user_id', userId);
+
+    return (response as List)
+        .map((row) => row['spot_id']?.toString() ?? '')
+        .where((id) => id.isNotEmpty)
+        .toSet();
+  }
+
+  @override
+  Future<bool> toggleLike(Spot spot, {required bool liked}) async {
+    final userId = await _ensureUserId();
+    if (userId == null) return false;
+
+    if (liked) {
+      await _client.from('likes').upsert({
+        'user_id': userId,
+        'spot_id': spot.id,
+      }, onConflict: 'user_id,spot_id');
+    } else {
+      await _client
+          .from('likes')
+          .delete()
+          .eq('user_id', userId)
+          .eq('spot_id', spot.id);
+    }
+    return true;
+  }
+
+  /// The author join is named explicitly for the same reason as [_spotSelect]:
+  /// profiles and comments are linked only by comments.author, but an
+  /// unqualified embed can still be rejected when the relationship is not
+  /// unique from PostgREST's point of view.
+  static const _commentSelect = '''
+    id,
+    spot_id,
+    author,
+    body,
+    created_at,
+    profiles!comments_author_fkey (display_name)
+  ''';
+
+  @override
+  Future<List<SpotComment>> fetchComments(String spotId) async {
+    final response = await _client
+        .from('comments')
+        .select(_commentSelect)
+        .eq('spot_id', spotId)
+        .order('created_at', ascending: false)
+        .limit(200);
+
+    return (response as List)
+        .map((row) => Map<String, dynamic>.from(row as Map))
+        .map(_commentFromRow)
+        .toList();
+  }
+
+  @override
+  Future<SpotComment> addComment({
+    required String spotId,
+    required String body,
+  }) async {
+    final userId = await _ensureUserId();
+    if (userId == null) {
+      throw const AppException(
+        'Sign in to join the conversation.',
+      );
+    }
+
+    final response = await _client
+        .from('comments')
+        .insert({
+          'spot_id': spotId,
+          'author': userId,
+          'body': body,
+        })
+        .select(_commentSelect)
+        .single();
+
+    return _commentFromRow(Map<String, dynamic>.from(response as Map));
+  }
+
+  SpotComment _commentFromRow(Map<String, dynamic> row) {
+    final profile = row['profiles'] == null
+        ? null
+        : Map<String, dynamic>.from(row['profiles'] as Map);
+    final name = profile?['display_name'] as String?;
+
+    return SpotComment(
+      id: row['id']?.toString() ?? '',
+      spotId: row['spot_id']?.toString() ?? '',
+      authorId: row['author']?.toString() ?? '',
+      authorName: (name == null || name.trim().isEmpty) ? 'Explorer' : name,
+      body: row['body'] as String? ?? '',
+      createdAt: DateTime.tryParse(row['created_at']?.toString() ?? '') ??
+          DateTime.now(),
+    );
   }
 
   @override
@@ -245,6 +357,8 @@ class SupabaseSpotRepository implements SpotRepository {
       photos: photos,
       saveCount: (row['save_count'] as num?)?.toInt() ?? 0,
       viewCount: (row['view_count'] as num?)?.toInt() ?? 0,
+      likeCount: (row['like_count'] as num?)?.toInt() ?? 0,
+      commentCount: (row['comment_count'] as num?)?.toInt() ?? 0,
       createdAt: row['created_at'] != null
           ? DateTime.tryParse(row['created_at'].toString())
           : null,

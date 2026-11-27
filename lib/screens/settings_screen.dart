@@ -5,7 +5,9 @@ import 'package:url_launcher/url_launcher.dart';
 import '../app_info.dart';
 import '../map/tile_sources.dart';
 import '../services/update_service.dart';
+import '../screens/auth_screen.dart';
 import '../state/app_state.dart';
+import '../state/auth_state.dart';
 import '../state/location_outcome.dart';
 import '../state/settings_state.dart';
 import '../theme/app_animations.dart';
@@ -22,6 +24,7 @@ class SettingsScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     final settings = context.watch<SettingsState>();
     final app = context.watch<AppState>();
+    final auth = context.watch<AuthState>();
     final theme = Theme.of(context).textTheme;
 
     return Scaffold(
@@ -30,6 +33,65 @@ class SettingsScreen extends StatelessWidget {
         child: ListView(
           padding: const EdgeInsets.fromLTRB(20, 12, 20, 40),
           children: [
+            _Section(
+              title: 'Account',
+              children: [
+                _InfoRow(label: 'Status', value: auth.statusLabel),
+                if (auth.isSignedIn)
+                  _InfoRow(label: 'Email', value: auth.email),
+                _InfoRow(label: 'Display name', value: auth.displayName),
+                if (auth.isSignedIn)
+                  _ActionRow(
+                    icon: Icons.logout_rounded,
+                    label: 'Sign out',
+                    onTap: () async {
+                      await auth.signOut();
+                      if (!context.mounted) return;
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(content: Text('Signed out.')),
+                      );
+                    },
+                  )
+                else
+                  _ActionRow(
+                    icon: Icons.person_add_alt_1_rounded,
+                    label: 'Sign in or create account',
+                    onTap: () => Navigator.of(context).push(
+                      AppMotion.slideUp(const AuthScreen()),
+                    ),
+                  ),
+              ],
+            ),
+            _Section(
+              title: 'Recommendations',
+              children: [
+                _InfoRow(
+                  label: 'Learned from',
+                  value: '${app.savedIds.length} saves · '
+                      '${app.likedCount} likes · '
+                      '${app.viewedCount} views',
+                ),
+                _InfoRow(
+                  label: 'Top interest',
+                  value: app.topInterests.isEmpty
+                      ? 'Not enough activity yet'
+                      : app.topInterests.first,
+                ),
+                _ActionRow(
+                  icon: Icons.restart_alt_rounded,
+                  label: 'Clear view history',
+                  onTap: () async {
+                    await app.clearViewHistory();
+                    if (!context.mounted) return;
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                        content: Text('View history cleared.'),
+                      ),
+                    );
+                  },
+                ),
+              ],
+            ),
             _Section(
               title: 'Map',
               children: [

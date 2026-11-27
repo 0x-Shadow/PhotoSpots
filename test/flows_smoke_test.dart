@@ -44,10 +44,11 @@ void main() {
 
     // Categories.
     await tester.scrollUntilVisible(
-      find.text('Categories'),
+      find.text('See all').first,
       220,
       scrollable: find.byType(Scrollable).first,
     );
+    await tester.pumpAndSettle();
     await tester.tap(find.text('See all').first);
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 600));
@@ -57,7 +58,12 @@ void main() {
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 600));
 
-    // Spot detail via the trending hero.
+    // Spot detail via the trending hero (scroll back up to the carousel).
+    await tester.drag(
+      find.byType(Scrollable).first,
+      const Offset(0, 1400),
+    );
+    await tester.pumpAndSettle();
     await tester.ensureVisible(find.byType(TrendingCard));
     await tester.pump();
     await tester.tap(find.byType(TrendingCard));

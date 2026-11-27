@@ -12,6 +12,7 @@ import '../data/spot_repository.dart';
 import '../map/map_tile_layers.dart';
 import '../map/tile_sources.dart';
 import '../services/geocoding.dart';
+import '../services/photo_metadata.dart';
 import '../state/app_state.dart';
 import '../state/location_outcome.dart';
 import '../state/settings_state.dart';
@@ -19,6 +20,7 @@ import '../theme/app_animations.dart';
 import '../theme/app_theme.dart';
 import '../utils/format.dart';
 import '../widgets/location_prompt.dart';
+import '../widgets/map_pin.dart';
 import '../widgets/spot_details_form.dart';
 
 /// Three deliberate steps: photo, location, details. The city comes from the
@@ -57,10 +59,15 @@ class _SubmitScreenState extends State<SubmitScreen> {
   Timer? _reverseTimer;
 
   Uint8List? _photoBytes;
+  PhotoLocation? _photoLocation;
   LatLng _pinned = AppState.fallbackCenter;
   String _address = '';
   bool _cityManual = false;
   bool _searching = false;
+  bool _searchFailed = false;
+  bool _searchEmpty = false;
+  bool _resolving = false;
+  bool _mapReadyForPin = false;
   bool _streetFallback = false;
   bool _submitting = false;
   List<PlaceSuggestion> _suggestions = const [];
@@ -98,22 +105,25 @@ class _SubmitScreenState extends State<SubmitScreen> {
 
   Future<void> _pickPhoto(ImageSource source) async {
     final messenger = ScaffoldMessenger.of(context);
+    final navigator = Navigator.of(context);
     try {
-      final picked = await ImagePicker().pickImage(
-        source: source,
-        maxWidth: 1600,
-        imageQuality: 85,
-      );
+      // Deliberately not downscaling or re-compressing: re-encoding can strip
+      // the EXIF block that tells us where the photo was taken.
+      final picked = await ImagePicker().pickImage(source: source);
       if (picked == null) return;
       final bytes = await picked.readAsBytes();
+      final gps = PhotoMetadata.readGps(bytes);
       if (!mounted) return;
       setState(() {
         _photoBytes = bytes;
+        _photoLocation = gps;
         // The system picker is already a deliberate decision; do not ask for
         // another confirmation tap before continuing.
         if (_step == 0) _step = 1;
       });
+      if (gps != null) _applyPhotoLocation(gps);
     } catch (_) {
+      if (!navigator.mounted) return;
       messenger.showSnackBar(
         SnackBar(
           content: Text(
@@ -126,20 +136,55 @@ class _SubmitScreenState extends State<SubmitScreen> {
     }
   }
 
-  /// Moves the pin and schedules a reverse lookup. A failed lookup leaves the
-  /// pin in place and reveals the manual city field.
-  void _setPin(LatLng point) {
-    _reverseTimer?.cancel();
+  /// Places the pin where the photo was taken and fills the address from it.
+  void _applyPhotoLocation(PhotoLocation gps) {
+    final point = LatLng(gps.latitude, gps.longitude);
     setState(() {
       _pinned = point;
       _address = '';
+      _resolving = true;
+      _usingDemoSeed = false;
       _cityManual = false;
-      _draft.city = '';
     });
-    _reverseTimer = Timer(const Duration(milliseconds: 400), () async {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || !_mapReadyForPin) return;
+      try {
+        _mapController.move(point, 15);
+      } catch (_) {
+        // The map attaches on the next frame; its initial centre is the pin.
+      }
+    });
+    _resolveAddress(point);
+  }
+
+  /// The map settled somewhere new. Only real changes move the pin, so
+  /// programmatic jumps never clear a city the user just chose.
+  void _onCenterChanged(LatLng point) {
+    if ((_pinned.latitude - point.latitude).abs() < 1e-7 &&
+        (_pinned.longitude - point.longitude).abs() < 1e-7) {
+      return;
+    }
+    setState(() {
+      _pinned = point;
+      _address = '';
+      _resolving = true;
+    });
+    _resolveAddress(point);
+  }
+
+  /// Debounced reverse lookup. A failure keeps the pin and reveals the manual
+  /// city field rather than blocking publishing.
+  void _resolveAddress(LatLng point) {
+    _reverseTimer?.cancel();
+    _reverseTimer = Timer(const Duration(milliseconds: 450), () async {
       final place = await _geocoder.reverse(point.latitude, point.longitude);
-      if (!mounted || _pinned != point) return;
+      if (!mounted) return;
+      if ((_pinned.latitude - point.latitude).abs() > 1e-7 ||
+          (_pinned.longitude - point.longitude).abs() > 1e-7) {
+        return;
+      }
       setState(() {
+        _resolving = false;
         if (place == null) {
           _cityManual = true;
           return;
@@ -157,33 +202,50 @@ class _SubmitScreenState extends State<SubmitScreen> {
   void _search(String query) {
     _searchTimer?.cancel();
     if (query.trim().isEmpty) {
-      setState(() => _suggestions = const []);
+      setState(() {
+        _suggestions = const [];
+        _searchFailed = false;
+        _searchEmpty = false;
+      });
       return;
     }
-    _searchTimer = Timer(const Duration(milliseconds: 500), () async {
-      setState(() => _searching = true);
-      final results = await _geocoder.search(query);
+    _searchTimer = Timer(const Duration(milliseconds: 450), () async {
+      setState(() {
+        _searching = true;
+        _searchFailed = false;
+        _searchEmpty = false;
+      });
+      final result = await _geocoder.searchPlaces(query);
       if (!mounted) return;
       setState(() {
-        _suggestions = results;
+        _suggestions = result.results;
         _searching = false;
+        _searchFailed = result.failed;
+        _searchEmpty = result.results.isEmpty && !result.failed;
       });
     });
   }
 
   void _chooseSuggestion(PlaceSuggestion suggestion) {
     final point = LatLng(suggestion.lat, suggestion.lng);
-    _mapController.move(point, 15);
     _reverseTimer?.cancel();
     setState(() {
       _pinned = point;
       _address = suggestion.label;
       _suggestions = const [];
+      _searchEmpty = false;
+      _searchFailed = false;
+      _resolving = false;
       _cityManual = suggestion.city.isEmpty;
       _draft
         ..city = suggestion.city
         ..name = suggestion.label.split(',').first.trim();
     });
+    try {
+      _mapController.move(point, 15);
+    } catch (_) {
+      // The controller attaches once the map lays out.
+    }
   }
 
   Future<void> _useMyLocation() async {
@@ -193,8 +255,18 @@ class _SubmitScreenState extends State<SubmitScreen> {
     final position = state.userLocation;
     if (position == null) return;
     final point = LatLng(position.latitude, position.longitude);
-    _mapController.move(point, 15);
-    _setPin(point);
+    setState(() {
+      _pinned = point;
+      _address = '';
+      _resolving = true;
+      _usingDemoSeed = false;
+    });
+    try {
+      _mapController.move(point, 15);
+    } catch (_) {
+      // The controller attaches once the map lays out.
+    }
+    _resolveAddress(point);
   }
 
   Future<void> _confirmPublish() async {
@@ -387,7 +459,10 @@ class _SubmitScreenState extends State<SubmitScreen> {
                       controller: _draft,
                       initialName: _draft.name,
                       initialCity: _draft.city,
+                      location: _pinned,
+                      address: _address,
                       cityEditable: _cityManual,
+                      onChangeLocation: () => setState(() => _step = 1),
                       onPublish: _confirmPublish,
                     ),
                   )
@@ -412,8 +487,12 @@ class _SubmitScreenState extends State<SubmitScreen> {
   Widget _stepContent() => switch (_step) {
         0 => _PhotoStep(
             photoBytes: _photoBytes,
+            photoLocation: _photoLocation,
             onPick: _pickPhoto,
-            onClear: () => setState(() => _photoBytes = null),
+            onClear: () => setState(() {
+              _photoBytes = null;
+              _photoLocation = null;
+            }),
           ),
         _ => _LocationStep(
             pinned: _pinned,
@@ -421,11 +500,23 @@ class _SubmitScreenState extends State<SubmitScreen> {
             address: _address,
             city: _draft.city,
             cityEditable: _cityManual,
+            photoDetected: _photoLocation != null,
             suggestions: _suggestions,
             searching: _searching,
+            searchFailed: _searchFailed,
+            searchEmpty: _searchEmpty,
+            resolving: _resolving,
             onSearch: _search,
             onChoose: _chooseSuggestion,
-            onPinMoved: _setPin,
+            onCenterChanged: _onCenterChanged,
+            onTapPoint: (point) {
+              try {
+                _mapController.move(point, _mapController.camera.zoom);
+              } catch (_) {
+                // The controller attaches once the map lays out.
+              }
+            },
+            onMapReady: () => _mapReadyForPin = true,
             onUseMyLocation: _useMyLocation,
             onCityChanged: (value) => setState(() => _draft.city = value),
             streetFallback: _streetFallback,
@@ -543,113 +634,286 @@ class _BottomBar extends StatelessWidget {
   }
 }
 
+/// Step one: one clear photo card, the two ways to add it, and a note about
+/// the location we can read from the file.
 class _PhotoStep extends StatelessWidget {
   const _PhotoStep({
     required this.photoBytes,
+    required this.photoLocation,
     required this.onPick,
     required this.onClear,
   });
 
   final Uint8List? photoBytes;
+  final PhotoLocation? photoLocation;
   final ValueChanged<ImageSource> onPick;
   final VoidCallback onClear;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context).textTheme;
+    final hasPhoto = photoBytes != null;
+
     return ListView(
-      padding: const EdgeInsets.fromLTRB(20, 16, 20, 20),
+      padding: const EdgeInsets.fromLTRB(20, 14, 20, 24),
       children: [
         Text('Show the spot at its best', style: theme.titleMedium),
         const SizedBox(height: 5),
         Text(
-          'One photo is required. Pick your best shot — it becomes the cover.',
+          hasPhoto
+              ? 'Swap it anytime before you publish.'
+              : 'One photo becomes the cover of the spot.',
           style: theme.bodySmall,
         ),
-        const SizedBox(height: 18),
-        GestureDetector(
-          onTap: () => onPick(ImageSource.gallery),
-          child: Container(
-            height: 300,
-            clipBehavior: Clip.antiAlias,
-            decoration: BoxDecoration(
-              color: AppColors.surfaceElevated,
-              borderRadius: BorderRadius.circular(20),
-              border: Border.all(
-                color: photoBytes != null
-                    ? AppColors.accentSoft
-                    : AppColors.hairline,
+        const SizedBox(height: 16),
+        AnimatedSwitcher(
+          duration: AppMotion.quick,
+          switchInCurve: AppMotion.easeOut,
+          child: hasPhoto
+              ? _PhotoPreview(
+                  key: const ValueKey('preview'),
+                  bytes: photoBytes!,
+                  onClear: onClear,
+                )
+              : _PhotoDropzone(
+                  key: const ValueKey('dropzone'),
+                  onPick: onPick,
+                ),
+        ),
+        const SizedBox(height: 14),
+        _PhotoLocationNote(
+          hasPhoto: hasPhoto,
+          location: photoLocation,
+        ),
+        const SizedBox(height: 20),
+        if (hasPhoto)
+          Row(
+            children: [
+              Expanded(
+                child: _PhotoSourceButton(
+                  icon: Icons.photo_library_rounded,
+                  label: 'Replace',
+                  filled: true,
+                  onTap: () => onPick(ImageSource.gallery),
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: _PhotoSourceButton(
+                  icon: Icons.photo_camera_rounded,
+                  label: 'Retake',
+                  onTap: () => onPick(ImageSource.camera),
+                ),
+              ),
+            ],
+          )
+        else
+          Row(
+            children: [
+              Expanded(
+                child: _PhotoSourceButton(
+                  icon: Icons.photo_library_rounded,
+                  label: 'Choose photo',
+                  filled: true,
+                  onTap: () => onPick(ImageSource.gallery),
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: _PhotoSourceButton(
+                  icon: Icons.photo_camera_rounded,
+                  label: 'Camera',
+                  onTap: () => onPick(ImageSource.camera),
+                ),
+              ),
+            ],
+          ),
+      ],
+    );
+  }
+}
+
+class _PhotoDropzone extends StatelessWidget {
+  const _PhotoDropzone({super.key, required this.onPick});
+
+  final ValueChanged<ImageSource> onPick;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context).textTheme;
+    return GestureDetector(
+      onTap: () => onPick(ImageSource.gallery),
+      child: Container(
+        height: 316,
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(24),
+          gradient: const LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: [Color(0xFF19191D), Color(0xFF0E0E10)],
+          ),
+          border: Border.all(color: const Color(0x33FFFFFF), width: 1.2),
+        ),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Container(
+              width: 68,
+              height: 68,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: AppColors.accentSoft,
+                border: Border.all(
+                  color: AppColors.accent.withValues(alpha: 0.45),
+                ),
+              ),
+              child: const Icon(
+                Icons.add_a_photo_rounded,
+                color: AppColors.accent,
+                size: 28,
               ),
             ),
-            child: photoBytes == null
-                ? Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      const Icon(Icons.add_a_photo_rounded,
-                          color: AppColors.textSecondary, size: 42),
-                      const SizedBox(height: 12),
-                      Text('Add your best shot', style: theme.titleSmall),
-                      const SizedBox(height: 4),
-                      Text(
-                        'JPG or PNG · one photo required',
-                        style: theme.bodySmall,
-                      ),
-                      const SizedBox(height: 20),
-                      Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          _PhotoSourceButton(
-                            icon: Icons.photo_library_rounded,
-                            label: 'Gallery',
-                            filled: true,
-                            onTap: () => onPick(ImageSource.gallery),
-                          ),
-                          const SizedBox(width: 10),
-                          _PhotoSourceButton(
-                            icon: Icons.photo_camera_rounded,
-                            label: 'Camera',
-                            onTap: () => onPick(ImageSource.camera),
-                          ),
-                        ],
-                      ),
-                    ],
-                  )
-                : Stack(
-                    fit: StackFit.expand,
-                    children: [
-                      Image.memory(photoBytes!, fit: BoxFit.cover),
-                      Positioned(
-                        top: 10,
-                        right: 10,
-                        child: Semantics(
-                          button: true,
-                          label: 'Remove photo',
-                          child: IconButton(
-                            onPressed: onClear,
-                            tooltip: 'Remove photo',
-                            icon: Container(
-                              padding: const EdgeInsets.all(7),
-                              decoration: const BoxDecoration(
-                                color: Colors.black54,
-                                shape: BoxShape.circle,
-                              ),
-                              child: const Icon(Icons.close_rounded,
-                                  color: Colors.white, size: 19),
-                            ),
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-          ),
+            const SizedBox(height: 16),
+            Text('Add your cover photo', style: theme.titleSmall),
+            const SizedBox(height: 5),
+            Text('JPEG or PNG · tap to browse', style: theme.bodySmall),
+          ],
         ),
-        const SizedBox(height: 12),
-        Text(
-          photoBytes == null
-              ? 'A photo is required to continue'
-              : 'Looking good — continue when ready.',
-          style: theme.bodySmall?.copyWith(
-            color: photoBytes == null ? AppColors.textFaint : AppColors.success,
+      ),
+    );
+  }
+}
+
+class _PhotoPreview extends StatelessWidget {
+  const _PhotoPreview({
+    super.key,
+    required this.bytes,
+    required this.onClear,
+  });
+
+  final Uint8List bytes;
+  final VoidCallback onClear;
+
+  @override
+  Widget build(BuildContext context) {
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(24),
+      child: SizedBox(
+        height: 316,
+        width: double.infinity,
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            Image.memory(
+              bytes,
+              fit: BoxFit.cover,
+              cacheWidth: 1200,
+              errorBuilder: (_, _, _) => const ColoredBox(
+                color: AppColors.surfaceElevated,
+                child: Center(
+                  child: Icon(
+                    Icons.broken_image_rounded,
+                    color: AppColors.textFaint,
+                    size: 34,
+                  ),
+                ),
+              ),
+            ),
+            const DecoratedBox(
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topCenter,
+                  end: Alignment.bottomCenter,
+                  colors: [Color(0x4D000000), Color(0x00000000), Color(0x66000000)],
+                ),
+              ),
+            ),
+            Positioned(
+              left: 12,
+              bottom: 12,
+              child: Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                decoration: BoxDecoration(
+                  color: const Color(0x99000000),
+                  borderRadius: BorderRadius.circular(999),
+                  border: Border.all(color: const Color(0x26FFFFFF)),
+                ),
+                child: const Text(
+                  'COVER PHOTO',
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 10,
+                    fontWeight: FontWeight.w800,
+                    letterSpacing: 1.2,
+                  ),
+                ),
+              ),
+            ),
+            Positioned(
+              top: 10,
+              right: 10,
+              child: Semantics(
+                button: true,
+                label: 'Remove photo',
+                child: IconButton(
+                  onPressed: onClear,
+                  tooltip: 'Remove photo',
+                  icon: Container(
+                    padding: const EdgeInsets.all(7),
+                    decoration: const BoxDecoration(
+                      color: Color(0x99000000),
+                      shape: BoxShape.circle,
+                    ),
+                    child: const Icon(
+                      Icons.close_rounded,
+                      color: Colors.white,
+                      size: 19,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _PhotoLocationNote extends StatelessWidget {
+  const _PhotoLocationNote({
+    required this.hasPhoto,
+    required this.location,
+  });
+
+  final bool hasPhoto;
+  final PhotoLocation? location;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context).textTheme;
+    final found = location != null;
+    final icon = !hasPhoto
+        ? Icons.auto_awesome_rounded
+        : found
+            ? Icons.location_on_rounded
+            : Icons.location_off_rounded;
+    final color = found ? AppColors.success : AppColors.textSecondary;
+    final text = !hasPhoto
+        ? 'If your photo has GPS data, we place the pin for you.'
+        : found
+            ? 'Location found in this photo — set on the next step.'
+            : 'No location saved in this photo. Drop the pin yourself.';
+
+    return Row(
+      children: [
+        Icon(icon, color: color, size: 17),
+        const SizedBox(width: 8),
+        Expanded(
+          child: Text(
+            text,
+            style: theme.bodySmall?.copyWith(color: color),
           ),
         ),
       ],
@@ -679,8 +943,7 @@ class _PhotoSourceButton extends StatelessWidget {
           : 'Choose a photo from the gallery',
       onTap: onTap,
       child: Container(
-        height: 44,
-        padding: const EdgeInsets.symmetric(horizontal: 16),
+        height: 48,
         decoration: BoxDecoration(
           color: filled ? AppColors.action : const Color(0x14FFFFFF),
           borderRadius: BorderRadius.circular(999),
@@ -689,16 +952,23 @@ class _PhotoSourceButton extends StatelessWidget {
           ),
         ),
         child: Row(
-          mainAxisSize: MainAxisSize.min,
+          mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(icon,
-                size: 17,
-                color: filled ? AppColors.onAction : AppColors.textPrimary),
+            Icon(
+              icon,
+              size: 17,
+              color: filled ? AppColors.onAction : AppColors.textPrimary,
+            ),
             const SizedBox(width: 7),
-            Text(
-              label,
-              style: theme.labelLarge?.copyWith(
-                color: filled ? AppColors.onAction : AppColors.textPrimary,
+            Flexible(
+              child: Text(
+                label,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: theme.labelLarge?.copyWith(
+                  color: filled ? AppColors.onAction : AppColors.textPrimary,
+                  fontWeight: FontWeight.w700,
+                ),
               ),
             ),
           ],
@@ -708,8 +978,8 @@ class _PhotoSourceButton extends StatelessWidget {
   }
 }
 
-/// Map-first location step: search, tap to place, and an address derived from
-/// the pin. A failed reverse lookup reveals a manual city field.
+/// Step two: search, a fixed centre pin the user can drag the map under, and an
+/// address that always describes the pin.
 class _LocationStep extends StatelessWidget {
   const _LocationStep({
     required this.pinned,
@@ -717,11 +987,17 @@ class _LocationStep extends StatelessWidget {
     required this.address,
     required this.city,
     required this.cityEditable,
+    required this.photoDetected,
     required this.suggestions,
     required this.searching,
+    required this.searchFailed,
+    required this.searchEmpty,
+    required this.resolving,
     required this.onSearch,
     required this.onChoose,
-    required this.onPinMoved,
+    required this.onCenterChanged,
+    required this.onTapPoint,
+    required this.onMapReady,
     required this.onUseMyLocation,
     required this.onCityChanged,
     required this.streetFallback,
@@ -735,11 +1011,17 @@ class _LocationStep extends StatelessWidget {
   final String address;
   final String city;
   final bool cityEditable;
+  final bool photoDetected;
   final List<PlaceSuggestion> suggestions;
   final bool searching;
+  final bool searchFailed;
+  final bool searchEmpty;
+  final bool resolving;
   final ValueChanged<String> onSearch;
   final ValueChanged<PlaceSuggestion> onChoose;
-  final ValueChanged<LatLng> onPinMoved;
+  final ValueChanged<LatLng> onCenterChanged;
+  final ValueChanged<LatLng> onTapPoint;
+  final VoidCallback onMapReady;
   final VoidCallback onUseMyLocation;
   final ValueChanged<String> onCityChanged;
   final bool streetFallback;
@@ -755,22 +1037,38 @@ class _LocationStep extends StatelessWidget {
         : context.watch<SettingsState>().activeMapStyle;
 
     return ListView(
-      padding: const EdgeInsets.fromLTRB(20, 8, 20, 20),
+      padding: const EdgeInsets.fromLTRB(20, 4, 20, 20),
       children: [
         if (usingDemoSeed)
           Padding(
             padding: const EdgeInsets.only(bottom: 10),
-            child: Text(
-              'No saved location yet — showing the demo area.',
-              style: theme.bodySmall?.copyWith(color: AppColors.textSecondary),
+            child: Row(
+              children: [
+                const Icon(
+                  Icons.info_outline_rounded,
+                  color: AppColors.textFaint,
+                  size: 15,
+                ),
+                const SizedBox(width: 7),
+                Expanded(
+                  child: Text(
+                    'No saved location yet — showing the demo area.',
+                    style: theme.bodySmall,
+                  ),
+                ),
+              ],
             ),
           ),
         TextField(
           controller: searchController,
           onChanged: onSearch,
           textInputAction: TextInputAction.search,
+          style: const TextStyle(
+            color: AppColors.textPrimary,
+            fontSize: 14.5,
+          ),
           decoration: InputDecoration(
-            hintText: 'Search a place',
+            hintText: 'Search a place, city, or address',
             prefixIcon: const Icon(Icons.search_rounded, size: 20),
             suffixIcon: searching
                 ? const Padding(
@@ -781,114 +1079,283 @@ class _LocationStep extends StatelessWidget {
                       child: CircularProgressIndicator(strokeWidth: 2),
                     ),
                   )
-                : null,
+                : (searchController.text.isEmpty
+                    ? null
+                    : IconButton(
+                        tooltip: 'Clear search',
+                        onPressed: () {
+                          searchController.clear();
+                          onSearch('');
+                        },
+                        icon: const Icon(
+                          Icons.close_rounded,
+                          color: AppColors.textFaint,
+                          size: 18,
+                        ),
+                      )),
           ),
         ),
         if (suggestions.isNotEmpty) ...[
           const SizedBox(height: 8),
-          DecoratedBox(
+          Container(
+            constraints: const BoxConstraints(maxHeight: 232),
             decoration: BoxDecoration(
               color: AppColors.surfaceElevated,
-              borderRadius: BorderRadius.circular(14),
+              borderRadius: BorderRadius.circular(16),
               border: Border.all(color: AppColors.hairline),
             ),
-            child: Column(
-              children: [
-                for (final suggestion in suggestions)
-                  InkWell(
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(16),
+              child: ListView.separated(
+                shrinkWrap: true,
+                padding: EdgeInsets.zero,
+                itemCount: suggestions.length,
+                separatorBuilder: (_, _) =>
+                    const Divider(height: 1, color: AppColors.hairline),
+                itemBuilder: (_, i) {
+                  final suggestion = suggestions[i];
+                  return InkWell(
                     onTap: () => onChoose(suggestion),
-                    child: ListTile(
-                      leading: const Icon(Icons.place_outlined,
-                          color: AppColors.accent, size: 20),
-                      title: Text(suggestion.label, style: theme.bodyLarge),
-                      subtitle: suggestion.city.isEmpty
-                          ? null
-                          : Text(suggestion.city, style: theme.bodySmall),
+                    child: Padding(
+                      padding: const EdgeInsets.fromLTRB(14, 11, 12, 11),
+                      child: Row(
+                        children: [
+                          const Icon(
+                            Icons.place_outlined,
+                            color: AppColors.accent,
+                            size: 19,
+                          ),
+                          const SizedBox(width: 11),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  suggestion.label,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: theme.bodyLarge?.copyWith(
+                                    color: AppColors.textPrimary,
+                                    fontSize: 14,
+                                  ),
+                                ),
+                                if (suggestion.city.isNotEmpty)
+                                  Text(
+                                    suggestion.city,
+                                    style: theme.bodySmall,
+                                  ),
+                              ],
+                            ),
+                          ),
+                          const Icon(
+                            Icons.north_west_rounded,
+                            color: AppColors.textFaint,
+                            size: 16,
+                          ),
+                        ],
+                      ),
                     ),
-                  ),
-              ],
+                  );
+                },
+              ),
             ),
+          ),
+        ],
+        if (searchFailed || searchEmpty) ...[
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              Icon(
+                searchFailed
+                    ? Icons.cloud_off_rounded
+                    : Icons.search_off_rounded,
+                color: AppColors.textFaint,
+                size: 15,
+              ),
+              const SizedBox(width: 7),
+              Expanded(
+                child: Text(
+                  searchFailed
+                      ? 'Search is unavailable right now. Drag the map to the spot instead.'
+                      : 'No places found. Try a city name, or drag the map.',
+                  style: theme.bodySmall,
+                ),
+              ),
+            ],
           ),
         ],
         const SizedBox(height: 12),
         ClipRRect(
-          borderRadius: BorderRadius.circular(20),
+          borderRadius: BorderRadius.circular(22),
           child: SizedBox(
-            height: 320,
-            child: FlutterMap(
-              mapController: mapController,
-              options: MapOptions(
-                initialCenter: pinned,
-                initialZoom: 14,
-                maxZoom: 18,
-                backgroundColor: AppColors.mapBackground,
-                interactionOptions: const InteractionOptions(
-                  flags: InteractiveFlag.drag |
-                      InteractiveFlag.pinchZoom |
-                      InteractiveFlag.doubleTapZoom |
-                      InteractiveFlag.flingAnimation,
-                ),
-                onTap: (_, point) => onPinMoved(point),
-                onPositionChanged: (camera, _) {
-                  final next = camera.center;
-                  if ((next.latitude - pinned.latitude).abs() > 1e-6 ||
-                      (next.longitude - pinned.longitude).abs() > 1e-6) {
-                    onPinMoved(next);
-                  }
-                },
-              ),
+            height: 322,
+            child: Stack(
               children: [
-                MapTileLayers(style: style, onFallback: (_) => onFallback()),
-                MarkerLayer(
-                  markers: [
-                    Marker(
-                      point: pinned,
-                      width: 36,
-                      height: 36,
-                      child: const Icon(
-                        Icons.place_rounded,
-                        color: AppColors.accent,
-                        size: 34,
+                Positioned.fill(
+                  child: FlutterMap(
+                    mapController: mapController,
+                    options: MapOptions(
+                      initialCenter: pinned,
+                      initialZoom: 14,
+                      maxZoom: 18,
+                      backgroundColor: AppColors.mapBackground,
+                      interactionOptions: const InteractionOptions(
+                        flags: InteractiveFlag.drag |
+                            InteractiveFlag.pinchZoom |
+                            InteractiveFlag.doubleTapZoom |
+                            InteractiveFlag.flingAnimation,
+                      ),
+                      onMapReady: onMapReady,
+                      onTap: (_, point) => onTapPoint(point),
+                      onPositionChanged: (camera, _) =>
+                          onCenterChanged(camera.center),
+                    ),
+                    children: [
+                      MapTileLayers(
+                        style: style,
+                        onFallback: (_) => onFallback(),
+                      ),
+                      MapAttribution(style: style),
+                    ],
+                  ),
+                ),
+                // The pin sits at the map centre; dragging the map moves the
+                // spot, which is far easier than hitting a small marker.
+                const Positioned.fill(
+                  child: IgnorePointer(
+                    child: Align(
+                      alignment: Alignment.center,
+                      child: FractionalTranslation(
+                        translation: Offset(0, -0.5),
+                        child: SpotPinPreview(),
                       ),
                     ),
-                  ],
+                  ),
                 ),
-                MapAttribution(style: style),
+                Positioned(
+                  right: 12,
+                  bottom: 12,
+                  child: PressButton(
+                    semanticLabel: 'Use my location',
+                    onTap: onUseMyLocation,
+                    child: Container(
+                      height: 44,
+                      padding: const EdgeInsets.symmetric(horizontal: 14),
+                      decoration: BoxDecoration(
+                        color: const Color(0xF20F0F11),
+                        borderRadius: BorderRadius.circular(999),
+                        border: Border.all(color: const Color(0x33FFFFFF)),
+                        boxShadow: const [
+                          BoxShadow(
+                            color: Color(0x59000000),
+                            blurRadius: 12,
+                            offset: Offset(0, 4),
+                          ),
+                        ],
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          const Icon(
+                            Icons.my_location_rounded,
+                            color: AppColors.textPrimary,
+                            size: 17,
+                          ),
+                          const SizedBox(width: 7),
+                          Text(
+                            'My location',
+                            style: theme.labelLarge?.copyWith(
+                              color: AppColors.textPrimary,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
               ],
             ),
           ),
         ),
         const SizedBox(height: 12),
-        Row(
-          children: [
-            Expanded(
-              child: Text(
-                address.isEmpty ? 'Tap or drag the map to place the pin' : address,
-                style: theme.bodySmall,
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-              ),
+        if (photoDetected)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 10),
+            child: Row(
+              children: [
+                const Icon(
+                  Icons.location_on_rounded,
+                  color: AppColors.success,
+                  size: 16,
+                ),
+                const SizedBox(width: 7),
+                Expanded(
+                  child: Text(
+                    'Pin placed from your photo’s GPS data. Drag the map to adjust.',
+                    style: theme.bodySmall?.copyWith(
+                      color: AppColors.success,
+                    ),
+                  ),
+                ),
+              ],
             ),
-            const SizedBox(width: 8),
-            TextButton.icon(
-              onPressed: onUseMyLocation,
-              icon: const Icon(Icons.my_location_rounded, size: 16),
-              label: const Text('Use my location'),
-              style: TextButton.styleFrom(
-                foregroundColor: AppColors.textPrimary,
-                textStyle: theme.labelLarge,
+          ),
+        Container(
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(
+            color: AppColors.surface,
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: AppColors.hairline),
+          ),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Padding(
+                padding: const EdgeInsets.only(top: 1),
+                child: Icon(
+                  resolving
+                      ? Icons.sync_rounded
+                      : Icons.place_rounded,
+                  color: resolving ? AppColors.textFaint : AppColors.accent,
+                  size: 19,
+                ),
               ),
-            ),
-          ],
-        ),
-        const SizedBox(height: 4),
-        Text(
-          '${pinned.latitude.toStringAsFixed(5)}, '
-          '${pinned.longitude.toStringAsFixed(5)}',
-          style: theme.bodySmall?.copyWith(color: AppColors.textFaint),
+              const SizedBox(width: 11),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      resolving
+                          ? 'Finding the address…'
+                          : address.isEmpty
+                              ? 'Drag the map to place the pin'
+                              : address,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.bodySmall?.copyWith(
+                        color: AppColors.textPrimary,
+                        fontSize: 13,
+                      ),
+                    ),
+                    const SizedBox(height: 3),
+                    Text(
+                      '${pinned.latitude.toStringAsFixed(5)}, '
+                      '${pinned.longitude.toStringAsFixed(5)}',
+                      style: theme.bodySmall?.copyWith(
+                        color: AppColors.textFaint,
+                        fontSize: 11.5,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
         ),
         if (cityEditable) ...[
-          const SizedBox(height: 12),
+          const SizedBox(height: 14),
           TextField(
             onChanged: onCityChanged,
             textCapitalization: TextCapitalization.words,
@@ -904,9 +1371,20 @@ class _LocationStep extends StatelessWidget {
           ),
         ] else if (city.isNotEmpty) ...[
           const SizedBox(height: 10),
-          Text('City: $city', style: theme.bodySmall),
+          Row(
+            children: [
+              const Icon(
+                Icons.location_city_rounded,
+                color: AppColors.textFaint,
+                size: 14,
+              ),
+              const SizedBox(width: 6),
+              Text('City: $city', style: theme.bodySmall),
+            ],
+          ),
         ],
       ],
     );
   }
 }
+

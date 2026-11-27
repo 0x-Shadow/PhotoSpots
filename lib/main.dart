@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:supabase_flutter/supabase_flutter.dart' hide AuthState;
 
 import 'app_info.dart';
 import 'data/spot_repository.dart';
@@ -9,6 +9,7 @@ import 'data/supabase_repository.dart';
 import 'screens/root_shell.dart';
 import 'screens/splash_screen.dart';
 import 'state/app_state.dart';
+import 'state/auth_state.dart';
 import 'state/settings_state.dart';
 import 'theme/app_theme.dart';
 import 'widgets/update_gate.dart';
@@ -55,6 +56,9 @@ class _PhotoSpotAppState extends State<PhotoSpotApp> {
         ),
         ChangeNotifierProvider(
           create: (_) => SettingsState()..load(),
+        ),
+        ChangeNotifierProvider(
+          create: (_) => AuthState()..load(),
         ),
       ],
       child: _LocationResumeObserver(

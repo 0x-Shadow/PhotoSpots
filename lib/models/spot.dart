@@ -38,6 +38,8 @@ class Spot {
     this.reviewCount = 0,
     this.saveCount = 0,
     this.viewCount = 0,
+    this.likeCount = 0,
+    this.commentCount = 0,
     this.createdAt,
     this.submittedBy,
   });
@@ -58,6 +60,8 @@ class Spot {
   final List<SpotPhoto> photos;
   final int saveCount;
   final int viewCount;
+  final int likeCount;
+  final int commentCount;
   final DateTime? createdAt;
   final String? submittedBy;
 
@@ -75,18 +79,27 @@ class Spot {
   List<String> get galleryUrls =>
       galleryPhotos.map((photo) => photo.url).toList();
 
-  /// Algorithmic ranking score.
+  /// Total engagement: every action a person can take, weighted by intent.
   ///
-  /// Saves dominate (the community's actual signal), freshness decays over 30
-  /// days, and views add a capped, minor contribution so a single viral view
-  /// spike cannot outrank a well-saved spot.
+  /// A save is the strongest deliberate signal, a like and a comment follow,
+  /// and views are capped so a viral spike cannot outrank a well-loved spot.
+  /// Quality (rating) and freshness keep a brand-new spot visible.
+  int get engagementCount => saveCount + likeCount + commentCount + viewCount;
+
+  /// Algorithmic ranking score. Weights are documented on [engagementCount].
   double get score {
     final age = createdAt == null
         ? const Duration(days: 999).inDays
         : DateTime.now().difference(createdAt!).inDays;
     final freshness = age >= 30 ? 0.0 : 40.0 * (1 - age / 30);
-    final viewBoost = (viewCount * 0.05).clamp(0.0, 30.0);
-    return saveCount * 2 + freshness + viewBoost;
+    final viewBoost = (viewCount * 0.05).clamp(0.0, 40.0);
+    final quality = rating * 6;
+    return saveCount * 3 +
+        likeCount * 2 +
+        commentCount * 2.5 +
+        viewBoost +
+        quality +
+        freshness;
   }
 
   Spot copyWith({
@@ -98,6 +111,8 @@ class Spot {
     String? bestTime,
     int? saveCount,
     int? viewCount,
+    int? likeCount,
+    int? commentCount,
     double? rating,
     int? reviewCount,
     List<SpotPhoto>? photos,
@@ -115,6 +130,8 @@ class Spot {
       photos: photos ?? this.photos,
       saveCount: saveCount ?? this.saveCount,
       viewCount: viewCount ?? this.viewCount,
+      likeCount: likeCount ?? this.likeCount,
+      commentCount: commentCount ?? this.commentCount,
       createdAt: createdAt,
       submittedBy: submittedBy,
     );

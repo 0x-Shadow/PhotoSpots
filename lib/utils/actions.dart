@@ -26,6 +26,26 @@ Future<void> toggleSaveWithFeedback(BuildContext context, Spot spot) async {
   );
 }
 
+/// Toggles a like and reports the real outcome.
+Future<void> toggleLikeWithFeedback(BuildContext context, Spot spot) async {
+  final state = context.read<AppState>();
+  final messenger = ScaffoldMessenger.maybeOf(context);
+  messenger?.hideCurrentSnackBar();
+
+  final synced = await state.toggleLike(spot);
+  final nowLiked = state.isLiked(spot.id);
+
+  final message = synced
+      ? (nowLiked ? 'Added to your likes' : 'Removed from your likes')
+      : (nowLiked
+          ? 'Liked on this device only — syncing failed.'
+          : "Couldn't update likes.");
+
+  messenger?.showSnackBar(
+    SnackBar(content: Text(message), duration: const Duration(seconds: 2)),
+  );
+}
+
 /// Opens the platform maps app at the spot.
 Future<void> openDirections(BuildContext context, Spot spot) async {
   final messenger = ScaffoldMessenger.maybeOf(context);

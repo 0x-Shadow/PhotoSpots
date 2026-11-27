@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:latlong2/latlong.dart';
 
 import '../theme/app_animations.dart';
 import '../theme/app_theme.dart';
@@ -24,16 +25,25 @@ class SpotDetailsForm extends StatefulWidget {
     required this.controller,
     required this.initialName,
     required this.initialCity,
+    this.location,
+    this.address = '',
     this.onPublish,
+    this.onChangeLocation,
     this.cityEditable = false,
   });
 
   final SpotDraftController controller;
   final String initialName;
   final String initialCity;
-  final VoidCallback? onPublish;
 
-  /// True only when the geocoder failed and the user must supply a city.
+  /// The pin chosen in the previous step, shown back as a summary so the city
+  /// can never silently disagree with the location.
+  final LatLng? location;
+  final String address;
+  final VoidCallback? onPublish;
+  final VoidCallback? onChangeLocation;
+
+  /// True when the geocoder failed and the user must supply a city.
   final bool cityEditable;
 
   static const bestTimeOptions = [
@@ -99,8 +109,17 @@ class _SpotDetailsFormState extends State<SpotDetailsForm> {
     final showError = draft.submitted && !draft.canPublish;
 
     return ListView(
-      padding: const EdgeInsets.fromLTRB(20, 8, 20, 20),
+      padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
       children: [
+        if (widget.location != null) ...[
+          _LocationSummary(
+            location: widget.location!,
+            city: widget.controller.city,
+            address: widget.address,
+            onChangeLocation: widget.onChangeLocation,
+          ),
+          const SizedBox(height: 20),
+        ],
         _FieldLabel('Spot name'),
         const SizedBox(height: 8),
         TextField(
@@ -131,29 +150,31 @@ class _SpotDetailsFormState extends State<SpotDetailsForm> {
           ),
         ),
         const SizedBox(height: 18),
-        _FieldLabel(widget.cityEditable ? 'City (enter manually)' : 'City'),
+        _FieldLabel('City'),
         const SizedBox(height: 8),
         TextField(
           controller: _city,
-          enabled: widget.cityEditable,
           textCapitalization: TextCapitalization.words,
           onChanged: (value) => setState(() => draft.city = value),
           style: theme.bodyLarge?.copyWith(color: AppColors.textPrimary),
-          decoration: InputDecoration(
-            hintText: 'From the pin',
-            suffixIcon: widget.cityEditable
-                ? const Icon(Icons.edit_rounded,
-                    color: AppColors.textFaint, size: 18)
-                : null,
+          decoration: const InputDecoration(
+            hintText: 'Nearest city',
+            prefixIcon: Icon(
+              Icons.location_city_rounded,
+              color: AppColors.textFaint,
+              size: 19,
+            ),
           ),
         ),
-        if (!widget.cityEditable) ...[
-          const SizedBox(height: 6),
-          Text(
-            'Filled in from the pin — change it under Location if needed.',
-            style: theme.bodySmall,
+        const SizedBox(height: 6),
+        Text(
+          widget.cityEditable
+              ? 'Address lookup failed — type the city yourself.'
+              : 'Filled in from your pin. Edit it here if it is not quite right.',
+          style: theme.bodySmall?.copyWith(
+            color: widget.cityEditable ? AppColors.danger : null,
           ),
-        ],
+        ),
         const SizedBox(height: 22),
         _FieldLabel('Best time to shoot'),
         const SizedBox(height: 10),
@@ -210,6 +231,87 @@ class _SpotDetailsFormState extends State<SpotDetailsForm> {
           ),
         ),
       ],
+    );
+  }
+}
+
+/// Confirms where the spot will be published and offers a way back to the map.
+class _LocationSummary extends StatelessWidget {
+  const _LocationSummary({
+    required this.location,
+    required this.city,
+    required this.address,
+    required this.onChangeLocation,
+  });
+
+  final LatLng location;
+  final String city;
+  final String address;
+  final VoidCallback? onChangeLocation;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context).textTheme;
+    return Container(
+      padding: const EdgeInsets.fromLTRB(14, 12, 8, 12),
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: AppColors.hairline),
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 36,
+            height: 36,
+            decoration: const BoxDecoration(
+              color: AppColors.accentSoft,
+              shape: BoxShape.circle,
+            ),
+            child: const Icon(
+              Icons.place_rounded,
+              color: AppColors.accent,
+              size: 19,
+            ),
+          ),
+          const SizedBox(width: 11),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  city.trim().isEmpty ? 'Location pinned' : city,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    color: AppColors.textPrimary,
+                    fontSize: 13.5,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  address.isEmpty
+                      ? '${location.latitude.toStringAsFixed(4)}, '
+                          '${location.longitude.toStringAsFixed(4)}'
+                      : address,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.bodySmall?.copyWith(fontSize: 11.5),
+                ),
+              ],
+            ),
+          ),
+          TextButton(
+            onPressed: onChangeLocation,
+            style: TextButton.styleFrom(
+              foregroundColor: AppColors.textSecondary,
+              visualDensity: VisualDensity.compact,
+            ),
+            child: const Text('Change'),
+          ),
+        ],
+      ),
     );
   }
 }

@@ -30,7 +30,8 @@ Future<UpdateAction?> showUpdateSheet(
     isScrollControlled: true,
     isDismissible: false,
     enableDrag: false,
-    backgroundColor: AppColors.surfaceElevated,
+    backgroundColor: Colors.black,
+    barrierColor: const Color(0x80000000),
     shape: const RoundedRectangleBorder(
       borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
     ),
@@ -71,6 +72,28 @@ Future<void> handleUpdateAction(
       ),
     );
   }
+}
+
+/// Release notes arrive as GitHub markdown. A phone sheet shows plain lines,
+/// so headings and bullets are flattened and the contributor credit block is
+/// dropped instead of printed as raw `##` and `*` noise.
+String cleanReleaseNotes(String raw) {
+  final buffer = StringBuffer();
+  for (final line in raw.split('\n')) {
+    var text = line.trim();
+    if (text.isEmpty) continue;
+    if (text.toLowerCase().startsWith('## new contributors') ||
+        text.toLowerCase().startsWith('new contributors')) {
+      break;
+    }
+    text = text.replaceAll(RegExp(r'^#+\s*'), '');
+    final isBullet = RegExp(r'^[-*+]\s+').hasMatch(text);
+    text = text.replaceAll(RegExp(r'^[-*+]\s+'), '');
+    text = text.replaceAll('**', '').replaceAll('__', '').replaceAll('`', '');
+    if (text.isEmpty) continue;
+    buffer.writeln(isBullet ? '•  $text' : text);
+  }
+  return buffer.toString().trim();
 }
 
 /// Presents an available release and drives the download/install flow.
@@ -233,70 +256,75 @@ class _UpdateSheetState extends State<UpdateSheet> {
 
     return PopScope(
       canPop: !_busy,
-      child: SafeArea(
-        child: Padding(
-          padding: EdgeInsets.fromLTRB(
-            22,
-            14,
-            22,
-            18 + MediaQuery.viewInsetsOf(context).bottom,
-          ),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Center(
-                child: Container(
-                  width: 36,
-                  height: 4,
-                  decoration: BoxDecoration(
-                    color: AppColors.hairline,
-                    borderRadius: BorderRadius.circular(2),
-                  ),
-                ),
-              ),
-              const SizedBox(height: 18),
-              Row(
-                children: [
-                  Container(
-                    width: 38,
-                    height: 38,
-                    decoration: const BoxDecoration(
-                      color: AppColors.accentSoft,
-                      shape: BoxShape.circle,
-                    ),
-                    child: const Icon(
-                      Icons.system_update_rounded,
-                      color: AppColors.accent,
-                      size: 21,
+      child: Container(
+        decoration: const BoxDecoration(
+          color: AppColors.surfaceElevated,
+          borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+        ),
+        child: SafeArea(
+          child: Padding(
+            padding: EdgeInsets.fromLTRB(
+              22,
+              14,
+              22,
+              18 + MediaQuery.viewInsetsOf(context).bottom,
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Center(
+                  child: Container(
+                    width: 36,
+                    height: 4,
+                    decoration: BoxDecoration(
+                      color: AppColors.hairline,
+                      borderRadius: BorderRadius.circular(2),
                     ),
                   ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Text('Update available', style: theme.titleLarge),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 14),
-              Text(
-                '${AppInfo.name} ${widget.release.version} is ready. '
-                'You are on ${AppInfo.version}.',
-                style: theme.bodyLarge?.copyWith(
-                  color: AppColors.textPrimary,
-                  fontWeight: FontWeight.w600,
                 ),
-              ),
-              const SizedBox(height: 14),
-              if (_phase == UpdatePhase.downloading)
-                _DownloadProgress(
-                  progress: _progress,
-                  received: _received,
-                  total: _total,
-                )
-              else if (_phase == UpdatePhase.installing)
+                const SizedBox(height: 18),
                 Row(
                   children: [
-                    const SizedBox(
+                    Container(
+                      width: 38,
+                      height: 38,
+                      decoration: const BoxDecoration(
+                        color: AppColors.accentSoft,
+                        shape: BoxShape.circle,
+                      ),
+                      child: const Icon(
+                        Icons.system_update_rounded,
+                        color: AppColors.accent,
+                        size: 21,
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Text('Update available', style: theme.titleLarge),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 14),
+                Text(
+                  '${AppInfo.name} ${widget.release.version} is ready. '
+                  'You are on ${AppInfo.version}.',
+                  style: theme.bodyLarge?.copyWith(
+                    color: AppColors.textPrimary,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                const SizedBox(height: 14),
+                if (_phase == UpdatePhase.downloading)
+                  _DownloadProgress(
+                    progress: _progress,
+                    received: _received,
+                    total: _total,
+                  )
+                else                 if (_phase == UpdatePhase.installing)
+                Row(
+                  children: [
+                    SizedBox(
                       width: 16,
                       height: 16,
                       child: CircularProgressIndicator(
@@ -313,44 +341,45 @@ class _UpdateSheetState extends State<UpdateSheet> {
                     ),
                   ],
                 )
-              else ...[
-                ConstrainedBox(
-                  constraints: const BoxConstraints(maxHeight: 160),
-                  child: SingleChildScrollView(
-                    child: Text(
-                      widget.release.notes.isEmpty
-                          ? 'Bug fixes and polish. No release notes were '
-                              'provided.'
-                          : widget.release.notes,
-                      style: theme.bodyMedium,
+                else ...[
+                  ConstrainedBox(
+                    constraints: const BoxConstraints(maxHeight: 160),
+                    child: SingleChildScrollView(
+                      child: Text(
+                        cleanReleaseNotes(widget.release.notes).isEmpty
+                            ? 'Bug fixes and polish. No release notes were '
+                                'provided.'
+                            : cleanReleaseNotes(widget.release.notes),
+                        style: theme.bodyMedium?.copyWith(height: 1.5),
+                      ),
                     ),
                   ),
+                  if (_phase == UpdatePhase.failed && _error != null) ...[
+                    const SizedBox(height: 12),
+                    Text(
+                      _error!,
+                      style: theme.bodyMedium?.copyWith(color: AppColors.danger),
+                    ),
+                  ],
+                  if (_phase == UpdatePhase.needsPermission) ...[
+                    const SizedBox(height: 12),
+                    Text(
+                      'Allow PhotoSpot to install updates, then tap Update again.',
+                      style: theme.bodyMedium,
+                    ),
+                  ],
+                ],
+                const SizedBox(height: 18),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.end,
+                  children: _actions(theme),
                 ),
-                if (_phase == UpdatePhase.failed && _error != null) ...[
-                  const SizedBox(height: 12),
-                  Text(
-                    _error!,
-                    style: theme.bodyMedium?.copyWith(color: AppColors.danger),
-                  ),
-                ],
-                if (_phase == UpdatePhase.needsPermission) ...[
-                  const SizedBox(height: 12),
-                  Text(
-                    'Allow PhotoSpot to install updates, then tap Update again.',
-                    style: theme.bodyMedium,
-                  ),
-                ],
               ],
-              const SizedBox(height: 18),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.end,
-                children: _actions(theme),
-              ),
-            ],
+            ),
           ),
         ),
       ),
-    );
+        );
   }
 
   List<Widget> _actions(TextTheme theme) {

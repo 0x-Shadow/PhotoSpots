@@ -2,6 +2,7 @@ import 'dart:typed_data';
 
 import 'package:latlong2/latlong.dart';
 
+import '../models/comment.dart';
 import '../models/spot.dart';
 
 /// A failure with a message that is safe to show to the user.
@@ -25,7 +26,20 @@ abstract class SpotRepository {
   /// Returns false when the save could not be persisted (e.g. no session).
   Future<bool> toggleSave(Spot spot, {required bool saved});
 
+  /// Liked spot IDs for the current user, or `null` when the source does not
+  /// own like state.
+  Future<Set<String>?> fetchLikedIds();
+
+  /// Returns false when the like could not be persisted.
+  Future<bool> toggleLike(Spot spot, {required bool liked});
+
   Future<void> recordView(Spot spot);
+
+  /// Newest comments first.
+  Future<List<SpotComment>> fetchComments(String spotId);
+
+  /// Adds a comment as the signed-in user and returns the stored row.
+  Future<SpotComment> addComment({required String spotId, required String body});
 
   Future<Spot> submitSpot({
     required String title,
@@ -41,14 +55,77 @@ abstract class SpotRepository {
 /// In-memory repository with curated seed data. Powers the app until
 /// Supabase credentials are configured.
 class MockSpotRepository implements SpotRepository {
+  MockSpotRepository() {
+    _comments.addAll(_seedComments(_spots));
+    // Keep the badge honest: the count is the number of comments we can show.
+    for (var i = 0; i < _spots.length; i++) {
+      final count =
+          _comments.where((c) => c.spotId == _spots[i].id).length;
+      if (count > 0) {
+        _spots[i] = _spots[i].copyWith(commentCount: count);
+      }
+    }
+  }
+
   final List<Spot> _spots = _seed();
   final Set<String> _savedIds = {};
+  final Set<String> _likedIds = {};
+  final List<SpotComment> _comments = [];
+
+  /// Comments written in this session are attributed to the local person.
+  String get _viewerName => 'You';
 
   @override
   Future<List<Spot>> fetchSpots() async => List.unmodifiable(_spots);
 
   @override
   Future<Set<String>?> fetchSavedIds() async => null;
+
+  @override
+  Future<Set<String>?> fetchLikedIds() async => null;
+
+  @override
+  Future<bool> toggleLike(Spot spot, {required bool liked}) async {
+    final i = _spots.indexWhere((s) => s.id == spot.id);
+    if (i != -1) {
+      final current = _spots[i];
+      final next = liked ? current.likeCount + 1 : current.likeCount - 1;
+      _spots[i] = current.copyWith(likeCount: next < 0 ? 0 : next);
+    }
+    if (liked) {
+      _likedIds.add(spot.id);
+    } else {
+      _likedIds.remove(spot.id);
+    }
+    return true;
+  }
+
+  @override
+  Future<List<SpotComment>> fetchComments(String spotId) async =>
+      _comments.where((comment) => comment.spotId == spotId).toList();
+
+  @override
+  Future<SpotComment> addComment({
+    required String spotId,
+    required String body,
+  }) async {
+    final comment = SpotComment(
+      id: 'c-${DateTime.now().microsecondsSinceEpoch}',
+      spotId: spotId,
+      authorId: 'local-you',
+      authorName: _viewerName,
+      body: body,
+      createdAt: DateTime.now(),
+    );
+    _comments.insert(0, comment);
+    final i = _spots.indexWhere((s) => s.id == spotId);
+    if (i != -1) {
+      _spots[i] = _spots[i].copyWith(
+        commentCount: _spots[i].commentCount + 1,
+      );
+    }
+    return comment;
+  }
 
   @override
   Future<bool> toggleSave(Spot spot, {required bool saved}) async {
@@ -143,6 +220,10 @@ List<Spot> _seed() {
       reviewCount: reviews > 0 ? reviews : (saves * 17 + views ~/ 3),
       saveCount: saves,
       viewCount: views,
+      // Seed engagement keeps the ranking and the comment section realistic
+      // in demo mode without pretending to have real users.
+      likeCount: (saves * 0.6).round(),
+      commentCount: 0,
       createdAt: now.subtract(Duration(days: daysAgo)),
       submittedBy: 'PhotoSpot',
       photos: [
@@ -305,4 +386,51 @@ List<Spot> _seed() {
       rating: 4.9, reviews: 1200,
     ),
   ];
+}
+
+/// A few believable comments so the section is never empty in demo mode.
+List<SpotComment> _seedComments(List<Spot> spots) {
+  final now = DateTime.now();
+  final seeds = <String, List<(String, String, int)>>{
+    'senhora-monte': [
+      ('Mara', 'Got here 50 minutes before sunset and the wall was free. Bring a jacket, it gets windy.', 0),
+      ('Tomás', 'Best skyline in the city. Use the low wall as a natural tripod.', 1),
+      ('Iris', 'Crowded by 19:00 in summer. Go early and shoot the west side.', 3),
+    ],
+    'santa-luzia': [
+      ('Nuno', 'The azulejo wall is in shade until about 09:30 — that is the soft light you want.', 2),
+      ('Ana', 'Bougainvillea was blooming in May. Perfect for portraits.', 5),
+    ],
+    'praca-comercio': [
+      ('Leo', 'Stand under the arch at blue hour and wait for the lamps to come on.', 1),
+      ('Sofia', 'Wide lens needed. The square is bigger than it looks.', 4),
+    ],
+    'trama-28': [
+      ('Rui', 'Tram comes every 8 minutes or so. Pre-focus and burst.', 0),
+      ('Bea', 'Morning is quieter and the light hits the yellow tram from the side.', 6),
+    ],
+    'graca-rooftops': [
+      ('Inês', 'Nobody here at sunrise. My favourite spot in Lisbon.', 1),
+    ],
+  };
+
+  final comments = <SpotComment>[];
+  var index = 0;
+  for (final spot in spots) {
+    final entries = seeds[spot.id];
+    if (entries == null) continue;
+    for (final (author, body, hoursAgo) in entries) {
+      comments.add(
+        SpotComment(
+          id: 'seed-${spot.id}-${index++}',
+          spotId: spot.id,
+          authorId: 'seed-$author',
+          authorName: author,
+          body: body,
+          createdAt: now.subtract(Duration(hours: hoursAgo + 1)),
+        ),
+      );
+    }
+  }
+  return comments;
 }

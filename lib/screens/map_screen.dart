@@ -16,6 +16,7 @@ import '../utils/categories.dart';
 import '../utils/format.dart';
 import '../utils/navigation.dart';
 import '../utils/share.dart';
+import '../widgets/map_pin.dart';
 import '../widgets/spot_image.dart';
 
 enum _MapSort { nearest, topRated, saved }
@@ -37,11 +38,14 @@ class _MapScreenState extends State<MapScreen> {
   final _searchController = TextEditingController();
 
   String? _selectedId;
-  String? _filterTag;
+
+  /// Category id from [spotFilters]; null means every category.
+  String? _filterCategoryId;
   String _query = '';
   _MapSort _sort = _MapSort.nearest;
   bool _mapReady = false;
   LatLng? _lastCenteredLocation;
+  DateTime? _lastMarkerTap;
 
   /// The basemap actually rendered: the preferred style unless the probe
   /// found it unusable and the session fell back.
@@ -70,7 +74,7 @@ class _MapScreenState extends State<MapScreen> {
     setState(() {
       _pendingFocus = point;
       _selectedId = null;
-      _filterTag = null;
+      _filterCategoryId = null;
       _query = '';
     });
     _moveMap(point, 15);
@@ -159,13 +163,7 @@ class _MapScreenState extends State<MapScreen> {
   }
 
   List<Spot> _visible(AppState state) {
-    var list = state.spots.where((spot) {
-      if (_filterTag != null &&
-          !spot.tags.any(
-            (tag) => tag.toLowerCase() == _filterTag!.toLowerCase(),
-          )) {
-        return false;
-      }
+    var list = spotsForFilter(state.spots, _filterCategoryId).where((spot) {
       final query = _query.trim().toLowerCase();
       if (query.isEmpty) return true;
       return spot.title.toLowerCase().contains(query) ||
@@ -311,9 +309,21 @@ class _MapScreenState extends State<MapScreen> {
                   _moveMap(state.referenceLocation, 13.5);
                 }
               },
+              // Deliberately left empty — deselection is handled by tapping the
+              // floating card's close button or by changing filters. The map's
+              // onTap fires 250ms after a marker tap (to distinguish from
+              // double-tap zoom), which would wrongly clear a just-made selection.
               onTap: (_, _) {
+                if (_selectedId == null) return;
+                // Marker taps set this; the map's own tap lags behind a marker
+                // tap and must not dismiss the card the user just opened.
+                final last = _lastMarkerTap;
+                if (last != null &&
+                    DateTime.now().difference(last) <
+                        const Duration(milliseconds: 400)) {
+                  return;
+                }
                 setState(() => _selectedId = null);
-                FocusManager.instance.primaryFocus?.unfocus();
               },
             ),
             children: [
@@ -327,25 +337,26 @@ class _MapScreenState extends State<MapScreen> {
                   if (state.userLocation != null)
                     Marker(
                       point: origin,
-                      width: 22,
-                      height: 22,
-                      child: Container(
-                        decoration: BoxDecoration(
-                          color: const Color(0xFF3B82F6),
-                          shape: BoxShape.circle,
-                          border: Border.all(color: Colors.white, width: 3),
-                          boxShadow: const [
-                            BoxShadow(color: Color(0x66000000), blurRadius: 8),
-                          ],
-                        ),
-                      ),
+                      width: 34,
+                      height: 34,
+                      child: const PulsingLocationDot(),
                     ),
+                  // Unselected pins first, then the selected one, so the active
+                  // pin is never buried under a neighbour.
                   for (final spot in spots)
-                    _spotMarker(
-                      spot: spot,
-                      selected: spot.id == _selectedId,
-                      showPhoto: settings.mapPhotoPins,
-                    ),
+                    if (spot.id != _selectedId)
+                      _spotMarker(
+                        spot: spot,
+                        selected: false,
+                        showPhoto: settings.mapPhotoPins,
+                      ),
+                  for (final spot in spots)
+                    if (spot.id == _selectedId)
+                      _spotMarker(
+                        spot: spot,
+                        selected: true,
+                        showPhoto: settings.mapPhotoPins,
+                      ),
                 ],
               ),
               MapAttribution(style: _activeStyle),
@@ -371,11 +382,12 @@ class _MapScreenState extends State<MapScreen> {
                         color: AppColors.textPrimary,
                         fontSize: 14.5,
                       ),
+                      textInputAction: TextInputAction.search,
                       decoration: InputDecoration(
-                        hintText: 'Search places…',
-                        fillColor: const Color(0xF20F0F11),
+                        hintText: 'Search spots or cities',
+                        fillColor: const Color(0xF70F0F11),
                         contentPadding: const EdgeInsets.symmetric(
-                          horizontal: 14,
+                          horizontal: 16,
                           vertical: 13,
                         ),
                         prefixIcon: const Icon(
@@ -383,22 +395,37 @@ class _MapScreenState extends State<MapScreen> {
                           color: AppColors.textSecondary,
                           size: 20,
                         ),
+                        suffixIcon: _query.isEmpty
+                            ? null
+                            : IconButton(
+                                tooltip: 'Clear search',
+                                onPressed: () {
+                                  _searchController.clear();
+                                  setState(() => _query = '');
+                                  FocusManager.instance.primaryFocus?.unfocus();
+                                },
+                                icon: const Icon(
+                                  Icons.close_rounded,
+                                  color: AppColors.textSecondary,
+                                  size: 18,
+                                ),
+                              ),
                         border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(14),
+                          borderRadius: BorderRadius.circular(999),
                           borderSide: const BorderSide(
                             color: AppColors.hairline,
                           ),
                         ),
                         enabledBorder: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(14),
+                          borderRadius: BorderRadius.circular(999),
                           borderSide: const BorderSide(
                             color: AppColors.hairline,
                           ),
                         ),
                         focusedBorder: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(14),
+                          borderRadius: BorderRadius.circular(999),
                           borderSide: const BorderSide(
-                            color: AppColors.hairline,
+                            color: Color(0x4DFFFFFF),
                           ),
                         ),
                       ),
@@ -412,14 +439,14 @@ class _MapScreenState extends State<MapScreen> {
                       width: 46,
                       height: 46,
                       decoration: BoxDecoration(
-                        color: const Color(0xF20F0F11),
-                        borderRadius: BorderRadius.circular(14),
+                        color: const Color(0xF70F0F11),
+                        shape: BoxShape.circle,
                         border: Border.all(color: AppColors.hairline),
                       ),
                       child: const Icon(
                         Icons.tune_rounded,
                         color: AppColors.textPrimary,
-                        size: 20,
+                        size: 19,
                       ),
                     ),
                   ),
@@ -488,14 +515,15 @@ class _MapScreenState extends State<MapScreen> {
                   separatorBuilder: (_, _) => const SizedBox(width: 8),
                   itemBuilder: (_, i) {
                     final filter = spotFilters[i];
-                    final active = filter.tag == _filterTag;
+                    final active = filter.categoryId == _filterCategoryId;
                     return GestureDetector(
                       onTap: () => setState(() {
                         // Tapping the active chip clears it; "All" always
                         // resets the filter.
-                        _filterTag = filter.tag == null || active
-                            ? null
-                            : filter.tag;
+                        _filterCategoryId =
+                            filter.categoryId == null || active
+                                ? null
+                                : filter.categoryId;
                         if (_selectedId != null &&
                             !_visible(state).any((s) => s.id == _selectedId)) {
                           _selectedId = null;
@@ -503,15 +531,12 @@ class _MapScreenState extends State<MapScreen> {
                       }),
                       child: AnimatedContainer(
                         duration: AppMotion.instant,
-                        constraints: const BoxConstraints(minHeight: 44),
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 15,
-                          vertical: 7,
-                        ),
+                        alignment: Alignment.center,
+                        padding: const EdgeInsets.symmetric(horizontal: 15),
                         decoration: BoxDecoration(
                           color: active
                               ? AppColors.action
-                              : const Color(0xF20F0F11),
+                              : const Color(0xF70F0F11),
                           borderRadius: BorderRadius.circular(999),
                           border: Border.all(
                             color: active
@@ -519,17 +544,31 @@ class _MapScreenState extends State<MapScreen> {
                                 : AppColors.hairline,
                           ),
                         ),
-                        child: Text(
-                          filter.label,
-                          style: TextStyle(
-                            color: active
-                                ? AppColors.onAction
-                                : AppColors.textSecondary,
-                            fontSize: 12.5,
-                            fontWeight: active
-                                ? FontWeight.w800
-                                : FontWeight.w600,
-                          ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            if (active) ...[
+                              Icon(
+                                Icons.check_rounded,
+                                size: 14,
+                                color: AppColors.onAction,
+                              ),
+                              const SizedBox(width: 5),
+                            ],
+                            Text(
+                              filter.label,
+                              style: TextStyle(
+                                color: active
+                                    ? AppColors.onAction
+                                    : AppColors.textSecondary,
+                                fontSize: 12.5,
+                                fontWeight: active
+                                    ? FontWeight.w800
+                                    : FontWeight.w600,
+                                height: 1.1,
+                              ),
+                            ),
+                          ],
                         ),
                       ),
                     );
@@ -540,70 +579,44 @@ class _MapScreenState extends State<MapScreen> {
           ),
         ),
 
-        // Share sits one control above Go to my location and lifts with it.
-        if (state.hasReferenceFix)
-          AnimatedPositioned(
-            duration: AppMotion.quick,
-            curve: AppMotion.easeOut,
-            right: 16,
-            bottom: (selected != null ? 188 : 76) + 54,
-            child: PressButton(
-              semanticLabel: 'Share my location',
-              onTap: () {
-                final point = state.referenceLocation;
-                shareLocationLink(
-                  context,
-                  lat: point.latitude,
-                  lng: point.longitude,
-                  title: 'My location',
-                );
-              },
-              child: Container(
-                width: 46,
-                height: 46,
-                decoration: BoxDecoration(
-                  color: const Color(0xF20F0F11),
-                  borderRadius: BorderRadius.circular(14),
-                  border: Border.all(color: AppColors.hairline),
-                ),
-                child: const Icon(
-                  Icons.share_location_rounded,
-                  color: AppColors.textPrimary,
-                  size: 21,
-                ),
-              ),
-            ),
-          ),
-
-        // Location button. Lifted above the floating spot card when one is
-        // open so the two never overlap.
+        // One glass control column: fit all pins, share my location, go to my
+        // location. It lifts above the spot card so the two never overlap.
         AnimatedPositioned(
           duration: AppMotion.quick,
           curve: AppMotion.easeOut,
           right: 16,
           bottom: selected != null ? 188 : 76,
-          child: PressButton(
-            semanticLabel: 'Go to my location',
-            onTap: _goToMyLocation,
-            child: Container(
-              width: 46,
-              height: 46,
-              decoration: BoxDecoration(
-                color: const Color(0xF20F0F11),
-                borderRadius: BorderRadius.circular(14),
-                border: Border.all(color: AppColors.hairline),
+          child: Column(
+            children: [
+              if (spots.length > 1)
+                _MapControl(
+                  icon: Icons.fit_screen_rounded,
+                  semanticLabel: 'Fit all spots on the map',
+                  onTap: () => _fitSpots(spots),
+                ),
+              if (spots.length > 1) const SizedBox(height: 8),
+              if (state.hasReferenceFix)
+                _MapControl(
+                  icon: Icons.ios_share_rounded,
+                  semanticLabel: 'Share my location',
+                  onTap: () {
+                    final point = state.referenceLocation;
+                    shareLocationLink(
+                      context,
+                      lat: point.latitude,
+                      lng: point.longitude,
+                      title: 'My location',
+                    );
+                  },
+                ),
+              if (state.hasReferenceFix) const SizedBox(height: 8),
+              _MapControl(
+                icon: Icons.my_location_rounded,
+                semanticLabel: 'Go to my location',
+                loading: state.locationLoading,
+                onTap: _goToMyLocation,
               ),
-              child: state.locationLoading
-                  ? const Padding(
-                      padding: EdgeInsets.all(14),
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    )
-                  : const Icon(
-                      Icons.my_location_rounded,
-                      color: AppColors.textPrimary,
-                      size: 21,
-                    ),
-            ),
+            ],
           ),
         ),
 
@@ -668,6 +681,7 @@ class _MapScreenState extends State<MapScreen> {
                           distanceKm: state.hasUserLocation
                               ? state.distanceKm(origin, selected)
                               : null,
+                          onClose: () => setState(() => _selectedId = null),
                         ),
                 ),
               ),
@@ -683,69 +697,104 @@ class _MapScreenState extends State<MapScreen> {
     required bool selected,
     required bool showPhoto,
   }) {
-    final style = pinStyleForSpot(spot);
+    final width =
+        selected ? MapPinMetrics.selectedWidth : MapPinMetrics.width;
+    final height =
+        selected ? MapPinMetrics.selectedHeight : MapPinMetrics.height;
 
+    // The tail tip is the anchor, so the pin points at the coordinate.
     return Marker(
       point: spot.location,
-      width: selected ? 58 : 42,
-      height: selected ? 58 : 42,
-      alignment: Alignment.center,
+      width: width,
+      height: height,
+      alignment: Alignment.topCenter,
       child: GestureDetector(
         onTap: () {
           FocusManager.instance.primaryFocus?.unfocus();
+          _lastMarkerTap = DateTime.now();
           setState(() => _selectedId = spot.id);
           _moveMap(spot.location, 15);
         },
-        child: selected
-            ? TweenAnimationBuilder<double>(
-                duration: AppMotion.layout,
-                curve: AppMotion.easeOut,
-                tween: Tween(begin: 0.72, end: 1.0),
-                builder: (context, scale, child) =>
-                    Transform.scale(scale: scale, child: child),
-                child: Container(
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    border: Border.all(color: Colors.white, width: 3),
-                    boxShadow: const [
-                      BoxShadow(
-                        color: Color(0x80000000),
-                        blurRadius: 12,
-                        offset: Offset(0, 4),
-                      ),
-                    ],
-                  ),
-                  child: ClipOval(
-                    child: showPhoto
-                        ? SpotImage(
-                            photo: spot.coverPhoto,
-                            width: 52,
-                            height: 52,
-                          )
-                        : _iconPin(style),
-                  ),
-                ),
-              )
-            : _iconPin(style),
+        behavior: HitTestBehavior.opaque,
+        child: TweenAnimationBuilder<double>(
+          duration: AppMotion.quick,
+          curve: AppMotion.easeOut,
+          tween: Tween(begin: selected ? 0.82 : 0.96, end: 1.0),
+          builder: (context, scale, child) =>
+              Transform.scale(scale: scale, child: child),
+          child: SpotPin(
+            spot: spot,
+            selected: selected,
+            showPhoto: showPhoto,
+          ),
+        ),
       ),
     );
   }
 
-  Widget _iconPin(({IconData icon, Color color}) style) {
-    return Container(
-      decoration: BoxDecoration(
-        color: style.color,
-        borderRadius: BorderRadius.circular(13),
-        border: Border.all(color: Colors.white, width: 2),
-        boxShadow: const [
-          BoxShadow(
-            color: Color(0x66000000),
-            blurRadius: 10,
-            offset: Offset(0, 4),
+  void _fitSpots(List<Spot> spots) {
+    if (!_mapReady || spots.isEmpty) return;
+    if (spots.length == 1) {
+      _moveMap(spots.first.location, 15);
+      return;
+    }
+    try {
+      _mapController.fitCamera(
+        CameraFit.bounds(
+          bounds: LatLngBounds.fromPoints(
+            spots.map((spot) => spot.location).toList(),
           ),
-        ],
+          padding: const EdgeInsets.all(64),
+          maxZoom: 16,
+        ),
+      );
+    } catch (_) {
+      // A map that has not laid out yet can be fitted on the next build.
+    }
+  }
+}
+
+/// A single circular glass control on the map.
+class _MapControl extends StatelessWidget {
+  const _MapControl({
+    required this.icon,
+    required this.semanticLabel,
+    required this.onTap,
+    this.loading = false,
+  });
+
+  final IconData icon;
+  final String semanticLabel;
+  final VoidCallback onTap;
+  final bool loading;
+
+  @override
+  Widget build(BuildContext context) {
+    return PressButton(
+      semanticLabel: semanticLabel,
+      onTap: onTap,
+      child: Container(
+        width: 46,
+        height: 46,
+        decoration: BoxDecoration(
+          color: const Color(0xF70F0F11),
+          shape: BoxShape.circle,
+          border: Border.all(color: const Color(0x2EFFFFFF)),
+          boxShadow: const [
+            BoxShadow(
+              color: Color(0x66000000),
+              blurRadius: 12,
+              offset: Offset(0, 4),
+            ),
+          ],
+        ),
+        child: loading
+            ? const Padding(
+                padding: EdgeInsets.all(14),
+                child: CircularProgressIndicator(strokeWidth: 2),
+              )
+            : Icon(icon, color: AppColors.textPrimary, size: 20),
       ),
-      child: Icon(style.icon, color: Colors.white, size: 17),
     );
   }
 }
@@ -761,6 +810,7 @@ class _FallbackNotice extends StatelessWidget {
   Widget build(BuildContext context) {
     return Center(
       child: Container(
+        constraints: const BoxConstraints(maxWidth: 460),
         padding: const EdgeInsets.only(left: 14, right: 4, top: 4, bottom: 4),
         decoration: BoxDecoration(
           color: const Color(0xE61A1A1D),
@@ -773,6 +823,8 @@ class _FallbackNotice extends StatelessWidget {
             Flexible(
               child: Text(
                 text,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
                 style: Theme.of(context).textTheme.labelLarge?.copyWith(
                   color: AppColors.textSecondary,
                 ),
@@ -803,10 +855,16 @@ class _FallbackNotice extends StatelessWidget {
 }
 
 class _PlaceCard extends StatelessWidget {
-  const _PlaceCard({super.key, required this.spot, this.distanceKm});
+  const _PlaceCard({
+    super.key,
+    required this.spot,
+    this.distanceKm,
+    this.onClose,
+  });
 
   final Spot spot;
   final double? distanceKm;
+  final VoidCallback? onClose;
 
   @override
   Widget build(BuildContext context) {
@@ -913,24 +971,47 @@ class _PlaceCard extends StatelessWidget {
                 ],
               ),
             ),
-            Semantics(
-              button: true,
-              label: saved ? 'Remove from saved' : 'Save spot',
-              child: IconButton(
-                onPressed: () => toggleSaveWithFeedback(context, spot),
-                tooltip: saved ? 'Remove from saved' : 'Save spot',
-                constraints: const BoxConstraints(
-                  minWidth: AppLayout.minTapTarget,
-                  minHeight: AppLayout.minTapTarget,
+            Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Semantics(
+                  button: true,
+                  label: saved ? 'Remove from saved' : 'Save spot',
+                  child: IconButton(
+                    onPressed: () => toggleSaveWithFeedback(context, spot),
+                    tooltip: saved ? 'Remove from saved' : 'Save spot',
+                    constraints: const BoxConstraints(
+                      minWidth: AppLayout.minTapTarget,
+                      minHeight: 44,
+                    ),
+                    icon: Icon(
+                      saved
+                          ? Icons.bookmark_rounded
+                          : Icons.bookmark_outline_rounded,
+                      color: saved ? AppColors.star : AppColors.textSecondary,
+                      size: 21,
+                    ),
+                  ),
                 ),
-                icon: Icon(
-                  saved
-                      ? Icons.bookmark_rounded
-                      : Icons.bookmark_outline_rounded,
-                  color: saved ? AppColors.star : AppColors.textSecondary,
-                  size: 21,
-                ),
-              ),
+                if (onClose != null)
+                  Semantics(
+                    button: true,
+                    label: 'Close place card',
+                    child: IconButton(
+                      onPressed: onClose,
+                      tooltip: 'Close',
+                      constraints: const BoxConstraints(
+                        minWidth: AppLayout.minTapTarget,
+                        minHeight: 40,
+                      ),
+                      icon: const Icon(
+                        Icons.close_rounded,
+                        color: AppColors.textFaint,
+                        size: 18,
+                      ),
+                    ),
+                  ),
+              ],
             ),
           ],
         ),

@@ -20,17 +20,17 @@ class PlanTripScreen extends StatefulWidget {
 }
 
 class _PlanTripScreenState extends State<PlanTripScreen> {
-  String? _tag;
+  String? _categoryId;
 
   @override
   Widget build(BuildContext context) {
     final state = context.watch<AppState>();
     final saved = state.savedSpots;
-    final itinerary = _tag == null
+    final itinerary = _categoryId == null
         ? saved
         : saved
             .where((spot) =>
-                spot.tags.any((t) => t.toLowerCase() == _tag!.toLowerCase()))
+                spotsForFilter([spot], _categoryId).isNotEmpty)
             .toList();
 
     final city = saved.isNotEmpty ? saved.first.city : 'your city';
@@ -217,10 +217,10 @@ class _PlanTripScreenState extends State<PlanTripScreen> {
                   separatorBuilder: (_, _) => const SizedBox(width: 8),
                   itemBuilder: (_, i) {
                     final category = spotCategories[i];
-                    final active = category.tag == _tag;
+                    final active = category.id == _categoryId;
                     return GestureDetector(
                       onTap: () => setState(
-                        () => _tag = active ? null : category.tag,
+                        () => _categoryId = active ? null : category.id,
                       ),
                       child: AnimatedContainer(
                         duration: AppMotion.instant,

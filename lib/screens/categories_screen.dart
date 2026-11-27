@@ -7,23 +7,19 @@ import '../theme/app_animations.dart';
 import '../theme/app_theme.dart';
 import '../utils/categories.dart';
 import '../utils/format.dart';
-import '../widgets/saved_row.dart';
-import '../widgets/state_views.dart';
+import '../widgets/spot_image.dart';
 import 'search_screen.dart';
+import 'spot_list_screen.dart';
 
-/// Category grid plus an optional filtered list of spots.
+/// The category chooser. Each tile opens the spots that actually carry the
+/// category's tags — the chooser itself never pretends to be results.
 class CategoriesScreen extends StatelessWidget {
-  const CategoriesScreen({
-    super.key,
-    this.filterTag,
-    this.allOnly = false,
-  });
-
-  final String? filterTag;
-  final bool allOnly;
+  const CategoriesScreen({super.key});
 
   @override
   Widget build(BuildContext context) {
+    final state = context.watch<AppState>();
+
     return Scaffold(
       body: SafeArea(
         child: ResponsiveBody(
@@ -36,15 +32,18 @@ class CategoriesScreen extends StatelessWidget {
                     semanticLabel: 'Back',
                     onTap: () => Navigator.of(context).maybePop(),
                     child: Container(
-                      width: 40,
-                      height: 40,
+                      width: 44,
+                      height: 44,
                       decoration: BoxDecoration(
                         color: const Color(0x14FFFFFF),
                         shape: BoxShape.circle,
                         border: Border.all(color: AppColors.hairline),
                       ),
-                      child: const Icon(Icons.arrow_back_rounded,
-                          color: AppColors.textPrimary, size: 20),
+                      child: const Icon(
+                        Icons.arrow_back_rounded,
+                        color: AppColors.textPrimary,
+                        size: 20,
+                      ),
                     ),
                   ),
                   const SizedBox(width: 12),
@@ -63,10 +62,10 @@ class CategoriesScreen extends StatelessWidget {
                         ),
                         SizedBox(height: 2),
                         Text(
-                          'Find the perfect vibe.',
+                          'Pick a mood — then the spots.',
                           style: TextStyle(
                             color: AppColors.textSecondary,
-                            fontSize: 14,
+                            fontSize: 13,
                           ),
                         ),
                       ],
@@ -84,8 +83,11 @@ class CategoriesScreen extends StatelessWidget {
                         shape: BoxShape.circle,
                         border: Border.all(color: AppColors.hairline),
                       ),
-                      child: const Icon(Icons.search_rounded,
-                          color: AppColors.textPrimary, size: 21),
+                      child: const Icon(
+                        Icons.search_rounded,
+                        color: AppColors.textPrimary,
+                        size: 21,
+                      ),
                     ),
                   ),
                 ],
@@ -101,19 +103,28 @@ class CategoriesScreen extends StatelessWidget {
                       crossAxisCount: columns,
                       crossAxisSpacing: 12,
                       mainAxisSpacing: 12,
-                      childAspectRatio: 0.78,
+                      childAspectRatio: 0.8,
                     ),
                     itemCount: spotCategories.length,
                     itemBuilder: (_, i) {
                       final category = spotCategories[i];
+                      final spots = state.categorySpots(category);
                       return RevealItem(
                         index: i,
                         total: spotCategories.length,
                         child: _CategoryCard(
                           category: category,
+                          count: spots.length,
+                          cover: spots.isEmpty ? null : spots.first.coverPhoto,
                           onTap: () => Navigator.of(context).push(
                             AppMotion.slideUp(
-                              CategoriesScreen(filterTag: category.tag),
+                              SpotListScreen(
+                                title: category.label,
+                                subtitle: category.subtitle,
+                                spotIds: [for (final spot in spots) spot.id],
+                                emptyMessage:
+                                    'No ${category.label.toLowerCase()} spots yet. Add the first one.',
+                              ),
                             ),
                           ),
                         ),
@@ -122,10 +133,6 @@ class CategoriesScreen extends StatelessWidget {
                   );
                 },
               ),
-              if (filterTag != null || allOnly) ...[
-                const SizedBox(height: 26),
-                _SpotList(tag: filterTag, allOnly: allOnly),
-              ],
             ],
           ),
         ),
@@ -135,23 +142,30 @@ class CategoriesScreen extends StatelessWidget {
 }
 
 class _CategoryCard extends StatelessWidget {
-  const _CategoryCard({required this.category, required this.onTap});
+  const _CategoryCard({
+    required this.category,
+    required this.count,
+    required this.cover,
+    required this.onTap,
+  });
 
   final SpotCategory category;
+  final int count;
+  final SpotPhoto? cover;
   final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
     return Semantics(
       button: true,
-      label: '${category.label} — ${category.subtitle}',
+      label: '${category.label} — $count spots',
       child: GestureDetector(
         onTap: onTap,
         child: Container(
           clipBehavior: Clip.antiAlias,
           decoration: BoxDecoration(
             color: AppColors.surfaceElevated,
-            borderRadius: BorderRadius.circular(16),
+            borderRadius: BorderRadius.circular(18),
             border: Border.all(color: AppColors.hairline),
           ),
           child: Column(
@@ -160,12 +174,14 @@ class _CategoryCard extends StatelessWidget {
               Expanded(
                 child: SizedBox(
                   width: double.infinity,
-                  child: Image.network(
-                    'https://picsum.photos/seed/${category.seed}/500/500',
-                    fit: BoxFit.cover,
-                    errorBuilder: (_, _, _) =>
-                        Container(color: AppColors.surface),
-                  ),
+                  child: cover != null
+                      ? SpotImage(photo: cover!)
+                      : Image.network(
+                          'https://picsum.photos/seed/${category.seed}/500/500',
+                          fit: BoxFit.cover,
+                          errorBuilder: (_, _, _) =>
+                              Container(color: AppColors.surface),
+                        ),
                 ),
               ),
               Padding(
@@ -191,7 +207,7 @@ class _CategoryCard extends StatelessWidget {
                           ),
                           const SizedBox(height: 2),
                           Text(
-                            category.subtitle,
+                            '$count ${count == 1 ? 'spot' : 'spots'}',
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
                             style: const TextStyle(
@@ -202,6 +218,11 @@ class _CategoryCard extends StatelessWidget {
                         ],
                       ),
                     ),
+                    const Icon(
+                      Icons.chevron_right_rounded,
+                      color: AppColors.textFaint,
+                      size: 18,
+                    ),
                   ],
                 ),
               ),
@@ -209,67 +230,6 @@ class _CategoryCard extends StatelessWidget {
           ),
         ),
       ),
-    );
-  }
-}
-
-class _SpotList extends StatelessWidget {
-  const _SpotList({this.tag, required this.allOnly});
-
-  final String? tag;
-  final bool allOnly;
-
-  List<Spot> _filter(AppState state) {
-    if (allOnly || tag == null) return state.rankedSpots;
-    return state.spots
-        .where((spot) =>
-            spot.tags.any((t) => t.toLowerCase() == tag!.toLowerCase()))
-        .toList();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final state = context.watch<AppState>();
-    final spots = _filter(state);
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          allOnly ? 'All spots' : '#${tag!}',
-          style: const TextStyle(
-            color: AppColors.textPrimary,
-            fontSize: 20,
-            fontWeight: FontWeight.w800,
-            letterSpacing: -0.4,
-          ),
-        ),
-        const SizedBox(height: 12),
-        if (spots.isEmpty)
-          const Padding(
-            padding: EdgeInsets.symmetric(vertical: 28),
-            child: EmptyState(
-              icon: Icons.photo_camera_outlined,
-              title: 'Nothing here yet',
-              message: 'No spots match this category yet. Add the first one.',
-            ),
-          )
-        else
-          for (var i = 0; i < spots.length; i++) ...[
-            RevealItem(
-              index: i,
-              total: spots.length,
-              child: SavedRow(
-                spot: spots[i],
-                heroTag: 'category-${tag ?? 'all'}-${spots[i].id}',
-                distanceKm: state.hasUserLocation
-                    ? state.distanceKm(state.referenceLocation, spots[i])
-                    : null,
-              ),
-            ),
-            const SizedBox(height: 10),
-          ],
-      ],
     );
   }
 }

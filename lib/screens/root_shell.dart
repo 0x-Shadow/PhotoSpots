@@ -1,5 +1,3 @@
-import 'dart:ui' show ImageFilter;
-
 import 'package:flutter/material.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:provider/provider.dart';
@@ -148,6 +146,11 @@ class _RootShellState extends State<RootShell>
         }
 
         return Scaffold(
+          backgroundColor: AppColors.background,
+          // The bar floats visually (rounded glass pill on inset margins) but
+          // still owns its layout space, so page content can never slide under
+          // it and steal taps. No BackdropFilter: that forces the whole body
+          // into an offscreen layer that renders soft on GLES emulators.
           body: _animatedScreen(),
           bottomNavigationBar: _NavBar(
             selectedSlot: _slotForScreenIndex(_index),
@@ -181,37 +184,139 @@ class _NavBar extends StatelessWidget {
     ),
   ];
 
+  /// Bar height, and the gap it floats above the home indicator.
+  static const double barHeight = 82;
+  static const double sideInset = 16;
+
   @override
   Widget build(BuildContext context) {
-    return Container(
-      decoration: const BoxDecoration(
-        border: Border(top: BorderSide(color: AppColors.hairline)),
+    final bottomInset = MediaQuery.paddingOf(context).bottom;
+
+    return Padding(
+      padding: EdgeInsets.fromLTRB(
+        sideInset,
+        0,
+        sideInset,
+        bottomInset > 8 ? bottomInset - 2 : 14,
       ),
-      child: BackdropFilter(
-        filter: ImageFilter.blur(sigmaX: 20, sigmaY: 20),
-        child: Container(
-          color: AppColors.background.withValues(alpha: 0.85),
-          child: SafeArea(
-            top: false,
-            child: SizedBox(
-              height: 62,
-              child: Row(
-                children: [
-                  for (var i = 0; i < _items.length; i++)
-                    Expanded(
-                      child: _items[i] == null
-                          ? _AddAction(onTap: () => onSlotSelected(2))
-                          : _NavItem(
-                              icon: _items[i]!.icon,
-                              activeIcon: _items[i]!.active,
-                              label: _items[i]!.label,
-                              selected: selectedSlot == i,
-                              onTap: () => onSlotSelected(i),
-                            ),
-                    ),
-                ],
-              ),
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(32),
+          gradient: const LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: [Color(0xF71E1E22), Color(0xFA0B0B0C)],
+          ),
+          border: Border.all(color: const Color(0x2EFFFFFF)),
+          boxShadow: const [
+            BoxShadow(
+              color: Color(0xC7000000),
+              blurRadius: 32,
+              spreadRadius: -6,
+              offset: Offset(0, 16),
             ),
+            BoxShadow(
+              color: Color(0x14FFFFFF),
+              blurRadius: 2,
+              offset: Offset(0, -1),
+            ),
+          ],
+        ),
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(32),
+          child: LayoutBuilder(
+            builder: (context, constraints) {
+              final itemWidth = constraints.maxWidth / _items.length;
+              // Slot 2 is the Add action; nothing sits behind it.
+              final showIndicator = selectedSlot != 2;
+              return Stack(
+                children: [
+                  // Liquid-glass sheen: a specular edge along the top and a
+                  // diagonal light sweep. Painted, not a backdrop filter, so
+                  // no saveLayer is created and text behind never softens.
+                  const Positioned.fill(
+                    child: IgnorePointer(
+                      child: DecoratedBox(
+                        decoration: BoxDecoration(
+                          gradient: LinearGradient(
+                            begin: Alignment.topLeft,
+                            end: Alignment.bottomRight,
+                            colors: [
+                              Color(0x2EFFFFFF),
+                              Color(0x00FFFFFF),
+                              Color(0x0FFFFFFF),
+                            ],
+                            stops: [0.0, 0.55, 1.0],
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                  Positioned(
+                    top: 0,
+                    left: 22,
+                    right: 22,
+                    child: Container(
+                      height: 1,
+                      decoration: const BoxDecoration(
+                        gradient: LinearGradient(
+                          colors: [
+                            Color(0x00FFFFFF),
+                            Color(0x99FFFFFF),
+                            Color(0x00FFFFFF),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                  // One travelling glass pill marks the active tab.
+                  AnimatedPositioned(
+                    duration: MediaQuery.disableAnimationsOf(context)
+                        ? Duration.zero
+                        : AppMotion.layout,
+                    curve: AppMotion.easeOut,
+                    left: itemWidth * selectedSlot + 7,
+                    top: 10,
+                    width: itemWidth - 14,
+                    height: barHeight - 20,
+                    child: AnimatedOpacity(
+                      duration: AppMotion.instant,
+                      opacity: showIndicator ? 1 : 0,
+                      child: Container(
+                        decoration: BoxDecoration(
+                          borderRadius: BorderRadius.circular(20),
+                          gradient: const LinearGradient(
+                            begin: Alignment.topCenter,
+                            end: Alignment.bottomCenter,
+                            colors: [Color(0x2EFFFFFF), Color(0x14FFFFFF)],
+                          ),
+                          border: Border.all(color: const Color(0x2EFFFFFF)),
+                        ),
+                      ),
+                    ),
+                  ),
+                  SizedBox(
+                    height: barHeight,
+                    child: Row(
+                      children: [
+                        for (var i = 0; i < _items.length; i++)
+                          Expanded(
+                            child: _items[i] == null
+                                ? _AddAction(onTap: () => onSlotSelected(2))
+                                : _NavItem(
+                                    icon: _items[i]!.icon,
+                                    activeIcon: _items[i]!.active,
+                                    label: _items[i]!.label,
+                                    selected: selectedSlot == i,
+                                    onTap: () => onSlotSelected(i),
+                                  ),
+                          ),
+                      ],
+                    ),
+                  ),
+                ],
+              );
+            },
           ),
         ),
       ),
@@ -237,7 +342,9 @@ class _NavItem extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final color = selected ? AppColors.textPrimary : AppColors.textFaint;
-    final style = Theme.of(context).textTheme.labelMedium!;
+    final motion = MediaQuery.disableAnimationsOf(context)
+        ? Duration.zero
+        : AppMotion.quick;
     return Semantics(
       button: true,
       selected: selected,
@@ -245,30 +352,37 @@ class _NavItem extends StatelessWidget {
       child: PressButton(
         onTap: onTap,
         child: SizedBox(
-          height: AppLayout.minTapTarget,
+          height: _NavBar.barHeight,
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              AnimatedContainer(
-                duration: AppMotion.instant,
+              AnimatedScale(
+                duration: motion,
                 curve: AppMotion.easeOut,
-                width: 44,
-                height: 22,
-                alignment: Alignment.center,
-                decoration: BoxDecoration(
-                  color: selected ? const Color(0x1AFFFFFF) : Colors.transparent,
-                  borderRadius: BorderRadius.circular(11),
+                scale: selected ? 1.0 : 0.94,
+                child: AnimatedSwitcher(
+                  duration: motion,
+                  switchInCurve: AppMotion.easeOut,
+                  child: Icon(
+                    selected ? activeIcon : icon,
+                    key: ValueKey(selected),
+                    color: color,
+                    size: 23,
+                  ),
                 ),
-                child: Icon(selected ? activeIcon : icon, color: color, size: 18),
               ),
-              Text(
-                label,
-                style: style.copyWith(
+              const SizedBox(height: 4),
+              AnimatedDefaultTextStyle(
+                duration: motion,
+                style: TextStyle(
+                  fontFamily: 'Inter',
                   color: color,
-                  fontSize: 10.5,
-                  height: 1,
+                  fontSize: 11,
+                  height: 1.1,
+                  letterSpacing: 0.1,
                   fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
                 ),
+                child: Text(label, maxLines: 1),
               ),
             ],
           ),
@@ -290,22 +404,38 @@ class _AddAction extends StatelessWidget {
     return PressButton(
       semanticLabel: 'Add a spot',
       onTap: onTap,
-      child: const SizedBox(
-        height: 52,
+      child: SizedBox(
+        height: _NavBar.barHeight,
         child: Center(
-          child: SizedBox(
-            width: 52,
-            height: 52,
-            child: DecoratedBox(
-              decoration: BoxDecoration(
-                color: AppColors.action,
-                shape: BoxShape.circle,
+          child: Container(
+            width: 56,
+            height: 56,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              gradient: const LinearGradient(
+                begin: Alignment.topCenter,
+                end: Alignment.bottomCenter,
+                colors: [Color(0xFFFFFFFF), Color(0xFFE2E2E7)],
               ),
-              child: Icon(
-                Icons.add_rounded,
-                color: AppColors.onAction,
-                size: 28,
-              ),
+              border: Border.all(color: const Color(0x8CFFFFFF), width: 1.5),
+              boxShadow: const [
+                BoxShadow(
+                  color: Color(0x66000000),
+                  blurRadius: 16,
+                  spreadRadius: -2,
+                  offset: Offset(0, 6),
+                ),
+                BoxShadow(
+                  color: Color(0x4DFFFFFF),
+                  blurRadius: 18,
+                  spreadRadius: -4,
+                ),
+              ],
+            ),
+            child: const Icon(
+              Icons.near_me_rounded,
+              color: AppColors.onAction,
+              size: 27,
             ),
           ),
         ),

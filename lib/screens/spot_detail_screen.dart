@@ -10,10 +10,11 @@ import '../utils/actions.dart';
 import '../utils/categories.dart';
 import '../utils/format.dart';
 import '../utils/share.dart';
+import '../widgets/comments_section.dart';
 import '../widgets/spot_image.dart';
 import '../widgets/spot_mini_map.dart';
 import '../widgets/state_views.dart';
-import 'categories_screen.dart';
+import 'spot_list_screen.dart';
 
 /// Spot detail: hero, honest facts, a location preview and one reachable
 /// action bar. All type comes from the theme; sections are divided by space
@@ -120,6 +121,8 @@ class _SpotDetailScreenState extends State<SpotDetailScreen> {
                                   )
                                 : 'demo area',
                           ),
+                          const SizedBox(height: 12),
+                          _EngagementRow(spot: spot),
                           const SizedBox(height: 18),
                           SpotMiniMap(
                             point: spot.location,
@@ -179,7 +182,22 @@ class _SpotDetailScreenState extends State<SpotDetailScreen> {
                                   InkWell(
                                     onTap: () => Navigator.of(context).push(
                                       AppMotion.slideUp(
-                                        CategoriesScreen(filterTag: tag),
+                                        SpotListScreen(
+                                          title: '#$tag',
+                                          subtitle:
+                                              'Every spot tagged $tag.',
+                                          spotIds: [
+                                            for (final item in state.spots)
+                                              if (item.tags.any(
+                                                (t) =>
+                                                    t.toLowerCase() ==
+                                                    tag.toLowerCase(),
+                                              ))
+                                                item.id,
+                                          ],
+                                          emptyMessage:
+                                              'No other spots use this tag yet.',
+                                        ),
                                       ),
                                     ),
                                     borderRadius: BorderRadius.circular(999),
@@ -205,6 +223,10 @@ class _SpotDetailScreenState extends State<SpotDetailScreen> {
                               ],
                             ),
                           ],
+                          const SizedBox(height: 26),
+                          const Divider(height: 1, color: AppColors.hairline),
+                          const SizedBox(height: 22),
+                          CommentsSection(spotId: spot.id),
                           if (photos.length > 1) ...[
                             const SizedBox(height: 22),
                             SizedBox(
@@ -521,6 +543,47 @@ class _HeroGallery extends StatelessWidget {
   }
 }
 
+/// Honest engagement: saves, likes, comments and views are real numbers from
+/// the store, so "famous" is measurable rather than decorative.
+class _EngagementRow extends StatelessWidget {
+  const _EngagementRow({required this.spot});
+
+  final Spot spot;
+
+  @override
+  Widget build(BuildContext context) {
+    final items = <(IconData, String, Color)>[
+      (Icons.bookmark_rounded, '${formatCount(spot.saveCount)} saves', AppColors.star),
+      (Icons.favorite_rounded, '${formatCount(spot.likeCount)} likes', AppColors.like),
+      (Icons.forum_rounded, '${formatCount(spot.commentCount)} comments', AppColors.accent),
+      (Icons.visibility_rounded, '${formatCount(spot.viewCount)} views', AppColors.textSecondary),
+    ];
+
+    return Wrap(
+      spacing: 14,
+      runSpacing: 6,
+      children: [
+        for (final (icon, label, color) in items)
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(icon, size: 13, color: color),
+              const SizedBox(width: 4),
+              Text(
+                label,
+                style: const TextStyle(
+                  color: AppColors.textSecondary,
+                  fontSize: 11.5,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ],
+          ),
+      ],
+    );
+  }
+}
+
 class _FactTile extends StatelessWidget {
   const _FactTile({
     required this.icon,
@@ -578,6 +641,8 @@ class _ActionBar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context).textTheme;
+    final state = context.watch<AppState>();
+    final liked = state.isLiked(spot.id);
     return Container(
       padding: const EdgeInsets.fromLTRB(16, 12, 16, 10),
       decoration: BoxDecoration(
@@ -589,6 +654,36 @@ class _ActionBar extends StatelessWidget {
         child: ResponsiveBody(
           child: Row(
             children: [
+              Semantics(
+                button: true,
+                label: liked ? 'Unlike this spot' : 'Like this spot',
+                child: PressButton(
+                  onTap: () => toggleLikeWithFeedback(context, spot),
+                  child: Container(
+                    width: 44,
+                    height: 44,
+                    decoration: BoxDecoration(
+                      color: liked
+                          ? AppColors.like.withValues(alpha: 0.16)
+                          : AppColors.surfaceElevated,
+                      borderRadius: BorderRadius.circular(16),
+                      border: Border.all(
+                        color: liked
+                            ? AppColors.like.withValues(alpha: 0.5)
+                            : AppColors.hairline,
+                      ),
+                    ),
+                    child: Icon(
+                      liked
+                          ? Icons.favorite_rounded
+                          : Icons.favorite_border_rounded,
+                      color: liked ? AppColors.like : AppColors.textPrimary,
+                      size: 22,
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 6),
               Semantics(
                 button: true,
                 label: saved ? 'Remove from saved' : 'Save spot',
