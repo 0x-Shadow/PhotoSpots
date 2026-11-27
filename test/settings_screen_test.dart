@@ -1,25 +1,14 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:photospot/data/spot_repository.dart';
 import 'package:photospot/screens/profile_screen.dart';
 import 'package:photospot/screens/settings_screen.dart';
-import 'package:photospot/state/app_state.dart';
 import 'package:photospot/state/settings_state.dart';
-import 'package:photospot/theme/app_theme.dart';
-import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-Widget _app({Widget home = const SettingsScreen()}) {
-  return MultiProvider(
-    providers: [
-      ChangeNotifierProvider(
-        create: (_) => AppState(MockSpotRepository())..load(),
-      ),
-      ChangeNotifierProvider(create: (_) => SettingsState()..load()),
-    ],
-    child: MaterialApp(theme: AppTheme.dark, home: home),
-  );
-}
+import 'helpers/test_harness.dart';
+
+Widget _app({Widget home = const SettingsScreen()}) =>
+    testApp(home: home);
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -56,16 +45,17 @@ void main() {
     expect(prefs.getString(SettingsState.mapStyleKey), isNull);
   });
 
-  testWidgets('profile has one settings entry and no Preferences sheet', (
+  testWidgets('profile reaches settings and has no Preferences sheet', (
     tester,
   ) async {
     await tester.pumpWidget(_app(home: const ProfileScreen()));
     await tester.pump();
 
     expect(find.text('Preferences'), findsNothing);
-    expect(find.bySemanticsLabel('Settings'), findsOneWidget);
+    final entry = find.byIcon(Icons.settings_rounded);
+    expect(entry, findsOneWidget);
 
-    await tester.tap(find.bySemanticsLabel('Settings'));
+    await tester.tap(entry);
     await tester.pumpAndSettle();
     expect(find.byType(SettingsScreen), findsOneWidget);
   });

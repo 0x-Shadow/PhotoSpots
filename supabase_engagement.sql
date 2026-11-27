@@ -20,6 +20,10 @@
 alter table spots add column if not exists like_count integer not null default 0;
 alter table spots add column if not exists comment_count integer not null default 0;
 
+alter table spots drop constraint if exists spots_engagement_nonnegative;
+alter table spots add constraint spots_engagement_nonnegative
+  check (like_count >= 0 and comment_count >= 0) not valid;
+
 alter table profiles add column if not exists city text;
 
 alter table profiles
@@ -75,6 +79,9 @@ create table if not exists comments (
 
 create index if not exists comments_spot_created_idx
   on comments (spot_id, created_at desc);
+create index if not exists comments_author_idx on comments (author);
+create index if not exists likes_spot_id_idx on likes (spot_id);
+create index if not exists likes_user_id_idx on likes (user_id);
 
 alter table comments enable row level security;
 
@@ -154,6 +161,7 @@ create trigger comments_sync_count
 create or replace function public.pin_comment_author()
 returns trigger
 language plpgsql
+security invoker set search_path = public
 as $$
 begin
   new.author := old.author;
@@ -192,6 +200,17 @@ update spots s
 -- ---------------------------------------------------------------------------
 revoke update (save_count, view_count, like_count, comment_count)
   on spots from anon, authenticated;
+
+-- Table-wide grants would silently re-authorise every column, so revoke them
+-- and grant back only the fields a person may write. Rating, review counts and
+-- all engagement counters stay server-owned.
+revoke insert, update on spots from anon, authenticated;
+grant insert (
+  title, description, city, latitude, longitude, tags, best_time, submitted_by
+) on spots to anon, authenticated;
+grant update (
+  title, description, city, latitude, longitude, tags, best_time
+) on spots to anon, authenticated;
 
 -- ---------------------------------------------------------------------------
 -- View privacy: the previous policy let any client read every view row.

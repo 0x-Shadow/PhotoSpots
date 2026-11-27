@@ -1,24 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:photospot/data/spot_repository.dart';
 import 'package:photospot/screens/root_shell.dart';
-import 'package:photospot/state/app_state.dart';
-import 'package:photospot/state/settings_state.dart';
-import 'package:photospot/theme/app_theme.dart';
-import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-Widget _app() {
-  return MultiProvider(
-    providers: [
-      ChangeNotifierProvider(
-        create: (_) => AppState(MockSpotRepository())..load(),
-      ),
-      ChangeNotifierProvider(create: (_) => SettingsState()..load()),
-    ],
-    child: MaterialApp(theme: AppTheme.dark, home: const RootShell()),
-  );
-}
+import 'helpers/test_harness.dart';
+
+Widget _app() => testApp(home: const RootShell());
 
 Future<void> _pumpApp(WidgetTester tester) async {
   await tester.pumpWidget(_app());

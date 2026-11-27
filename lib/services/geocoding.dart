@@ -106,7 +106,12 @@ class GeocodingService {
       queryParameters: {'q': query, 'limit': '$limit'},
     );
     final response = await owned.get(uri).timeout(const Duration(seconds: 6));
-    if (response.statusCode != 200) return const [];
+    // A rate limit or outage must fall through to the next provider and, if
+    // every provider fails, reach the UI as "search unavailable" — not as an
+    // empty result set that reads like "no such place".
+    if (response.statusCode != 200) {
+      throw StateError('Photon returned HTTP ${response.statusCode}');
+    }
     final data = jsonDecode(response.body);
     if (data is! Map<String, dynamic> || data['features'] is! List) {
       return const [];

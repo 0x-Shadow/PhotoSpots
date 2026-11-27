@@ -12,6 +12,7 @@ import '../data/spot_repository.dart';
 import '../map/map_tile_layers.dart';
 import '../map/tile_sources.dart';
 import '../services/geocoding.dart';
+import '../services/photo_compression.dart';
 import '../services/photo_metadata.dart';
 import '../state/app_state.dart';
 import '../state/location_outcome.dart';
@@ -373,10 +374,16 @@ class _SubmitScreenState extends State<SubmitScreen> {
     if (_submitting) return;
     final messenger = ScaffoldMessenger.of(context);
     final navigator = Navigator.of(context);
+    final app = context.read<AppState>();
     setState(() => _submitting = true);
 
     try {
-      await context.read<AppState>().submitSpot(
+      // The EXIF GPS was read from the original bytes at pick time; only the
+      // upload is downscaled, so a multi-megapixel camera shot no longer costs
+      // seconds of upload and a large storage object.
+      final photoBytes =
+          _photoBytes == null ? null : await compressForUpload(_photoBytes!);
+      await app.submitSpot(
             title: _draft.name.trim(),
             description: _draft.tip.trim().isEmpty
                 ? 'A photo spot shared by the ${AppInfo.name} community.'
@@ -385,7 +392,7 @@ class _SubmitScreenState extends State<SubmitScreen> {
             city: _draft.city.trim(),
             tags: _draft.tags.toList(),
             bestTime: _draft.bestTime,
-            photoBytes: _photoBytes,
+            photoBytes: photoBytes,
           );
       if (!mounted) return;
       navigator.pop();
@@ -539,47 +546,69 @@ class _ProgressBar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context).textTheme;
+    final motion = MediaQuery.disableAnimationsOf(context)
+        ? Duration.zero
+        : AppMotion.quick;
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
-      child: Column(
+      padding: const EdgeInsets.fromLTRB(20, 6, 20, 14),
+      child: Row(
         children: [
-          Row(
-            children: [
-              for (var i = 0; i < titles.length; i++)
-                Expanded(
-                  child: AnimatedContainer(
-                    duration: AppMotion.instant,
-                    height: 3,
-                    margin: const EdgeInsets.symmetric(horizontal: 3),
-                    decoration: BoxDecoration(
-                      color: i <= step ? AppColors.action : AppColors.hairline,
-                      borderRadius: BorderRadius.circular(2),
-                    ),
+          for (var i = 0; i < titles.length; i++) ...[
+            if (i > 0) const SizedBox(width: 8),
+            Expanded(
+              child: AnimatedContainer(
+                duration: motion,
+                curve: AppMotion.easeOut,
+                height: 34,
+                alignment: Alignment.center,
+                decoration: BoxDecoration(
+                  color: i == step
+                      ? AppColors.action
+                      : i < step
+                          ? const Color(0x14FFFFFF)
+                          : Colors.transparent,
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(
+                    color: i == step
+                        ? AppColors.action
+                        : i < step
+                            ? Colors.transparent
+                            : AppColors.hairline,
                   ),
                 ),
-            ],
-          ),
-          const SizedBox(height: 10),
-          Row(
-            children: [
-              for (var i = 0; i < titles.length; i++)
-                Expanded(
-                  child: Text(
-                    titles[i],
-                    textAlign: TextAlign.center,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: theme.labelMedium?.copyWith(
-                      color: i <= step
-                          ? AppColors.textPrimary
-                          : AppColors.textFaint,
-                      fontWeight:
-                          i <= step ? FontWeight.w700 : FontWeight.w500,
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    if (i < step) ...[
+                      const Icon(
+                        Icons.check_rounded,
+                        size: 13,
+                        color: AppColors.textSecondary,
+                      ),
+                      const SizedBox(width: 4),
+                    ],
+                    Flexible(
+                      child: Text(
+                        titles[i],
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: theme.labelMedium?.copyWith(
+                          fontSize: 11.5,
+                          fontWeight:
+                              i == step ? FontWeight.w800 : FontWeight.w500,
+                          color: i == step
+                              ? AppColors.onAction
+                              : i < step
+                                  ? AppColors.textSecondary
+                                  : AppColors.textFaint,
+                        ),
+                      ),
                     ),
-                  ),
+                  ],
                 ),
-            ],
-          ),
+              ),
+            ),
+          ],
         ],
       ),
     );
@@ -615,9 +644,9 @@ class _BottomBar extends StatelessWidget {
           child: Container(
             height: 52,
             alignment: Alignment.center,
-            decoration: BoxDecoration(
+                            decoration: BoxDecoration(
               color: enabled ? AppColors.action : AppColors.hairline,
-              borderRadius: BorderRadius.circular(14),
+              borderRadius: BorderRadius.circular(16),
             ),
             child: Text(
               step == 0 ? 'Next' : 'Continue',
@@ -655,79 +684,80 @@ class _PhotoStep extends StatelessWidget {
     final hasPhoto = photoBytes != null;
 
     return ListView(
-      padding: const EdgeInsets.fromLTRB(20, 14, 20, 24),
+      padding: const EdgeInsets.fromLTRB(20, 6, 20, 28),
       children: [
-        Text('Show the spot at its best', style: theme.titleMedium),
-        const SizedBox(height: 5),
+        Text(
+          'Show the spot at its best',
+          style: theme.titleLarge?.copyWith(
+            fontSize: 24,
+            height: 1.15,
+            letterSpacing: -0.7,
+          ),
+        ),
+        const SizedBox(height: 6),
         Text(
           hasPhoto
               ? 'Swap it anytime before you publish.'
               : 'One photo becomes the cover of the spot.',
-          style: theme.bodySmall,
+          style: theme.bodyMedium,
         ),
-        const SizedBox(height: 16),
-        AnimatedSwitcher(
-          duration: AppMotion.quick,
-          switchInCurve: AppMotion.easeOut,
-          child: hasPhoto
-              ? _PhotoPreview(
-                  key: const ValueKey('preview'),
-                  bytes: photoBytes!,
-                  onClear: onClear,
-                )
-              : _PhotoDropzone(
-                  key: const ValueKey('dropzone'),
-                  onPick: onPick,
-                ),
+        const SizedBox(height: 18),
+        LayoutBuilder(
+          builder: (context, constraints) {
+            final height =
+                (constraints.maxWidth * 1.14).clamp(280.0, 420.0).toDouble();
+            return SizedBox(
+              height: height,
+              child: AnimatedSwitcher(
+                duration: AppMotion.quick,
+                switchInCurve: AppMotion.easeOut,
+                child: hasPhoto
+                    ? _PhotoPreview(
+                        key: const ValueKey('preview'),
+                        bytes: photoBytes!,
+                        location: photoLocation,
+                        onClear: onClear,
+                      )
+                    : _PhotoDropzone(
+                        key: const ValueKey('dropzone'),
+                        onPick: onPick,
+                      ),
+              ),
+            );
+          },
         ),
         const SizedBox(height: 14),
         _PhotoLocationNote(
           hasPhoto: hasPhoto,
           location: photoLocation,
         ),
-        const SizedBox(height: 20),
-        if (hasPhoto)
-          Row(
-            children: [
-              Expanded(
-                child: _PhotoSourceButton(
-                  icon: Icons.photo_library_rounded,
-                  label: 'Replace',
-                  filled: true,
-                  onTap: () => onPick(ImageSource.gallery),
-                ),
+        const SizedBox(height: 18),
+        Row(
+          children: [
+            Expanded(
+              child: _PhotoSourceButton(
+                icon: Icons.photo_library_rounded,
+                label: hasPhoto ? 'Replace' : 'Choose photo',
+                filled: true,
+                onTap: () => onPick(ImageSource.gallery),
               ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: _PhotoSourceButton(
-                  icon: Icons.photo_camera_rounded,
-                  label: 'Retake',
-                  onTap: () => onPick(ImageSource.camera),
-                ),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: _PhotoSourceButton(
+                icon: Icons.photo_camera_rounded,
+                label: hasPhoto ? 'Retake' : 'Camera',
+                onTap: () => onPick(ImageSource.camera),
               ),
-            ],
-          )
-        else
-          Row(
-            children: [
-              Expanded(
-                child: _PhotoSourceButton(
-                  icon: Icons.photo_library_rounded,
-                  label: 'Choose photo',
-                  filled: true,
-                  onTap: () => onPick(ImageSource.gallery),
-                ),
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: _PhotoSourceButton(
-                  icon: Icons.photo_camera_rounded,
-                  label: 'Camera',
-                  onTap: () => onPick(ImageSource.camera),
-                ),
-              ),
-            ],
-          ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 14),
+        Text(
+          'The original file is checked for GPS before anything is uploaded.',
+          textAlign: TextAlign.center,
+          style: theme.bodySmall?.copyWith(color: AppColors.textFaint),
+        ),
       ],
     );
   }
@@ -743,40 +773,39 @@ class _PhotoDropzone extends StatelessWidget {
     final theme = Theme.of(context).textTheme;
     return GestureDetector(
       onTap: () => onPick(ImageSource.gallery),
+      behavior: HitTestBehavior.opaque,
       child: Container(
-        height: 316,
         decoration: BoxDecoration(
+          color: AppColors.surface,
           borderRadius: BorderRadius.circular(24),
-          gradient: const LinearGradient(
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-            colors: [Color(0xFF19191D), Color(0xFF0E0E10)],
-          ),
-          border: Border.all(color: const Color(0x33FFFFFF), width: 1.2),
+          border: Border.all(color: const Color(0x24FFFFFF)),
         ),
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
             Container(
-              width: 68,
-              height: 68,
+              width: 66,
+              height: 66,
               decoration: BoxDecoration(
-                shape: BoxShape.circle,
                 color: AppColors.accentSoft,
+                borderRadius: BorderRadius.circular(20),
                 border: Border.all(
-                  color: AppColors.accent.withValues(alpha: 0.45),
+                  color: AppColors.accent.withValues(alpha: 0.25),
                 ),
               ),
               child: const Icon(
-                Icons.add_a_photo_rounded,
+                Icons.add_photo_alternate_rounded,
                 color: AppColors.accent,
                 size: 28,
               ),
             ),
-            const SizedBox(height: 16),
-            Text('Add your cover photo', style: theme.titleSmall),
-            const SizedBox(height: 5),
-            Text('JPEG or PNG · tap to browse', style: theme.bodySmall),
+            const SizedBox(height: 18),
+            Text('Add your cover photo', style: theme.titleMedium),
+            const SizedBox(height: 6),
+            Text(
+              'JPEG, PNG or HEIC · tap to browse',
+              style: theme.bodySmall,
+            ),
           ],
         ),
       ),
@@ -788,94 +817,119 @@ class _PhotoPreview extends StatelessWidget {
   const _PhotoPreview({
     super.key,
     required this.bytes,
+    this.location,
     required this.onClear,
   });
 
   final Uint8List bytes;
+  final PhotoLocation? location;
   final VoidCallback onClear;
 
   @override
   Widget build(BuildContext context) {
+    final found = location != null;
     return ClipRRect(
       borderRadius: BorderRadius.circular(24),
-      child: SizedBox(
-        height: 316,
-        width: double.infinity,
-        child: Stack(
-          fit: StackFit.expand,
-          children: [
-            Image.memory(
-              bytes,
-              fit: BoxFit.cover,
-              cacheWidth: 1200,
-              errorBuilder: (_, _, _) => const ColoredBox(
-                color: AppColors.surfaceElevated,
-                child: Center(
-                  child: Icon(
-                    Icons.broken_image_rounded,
-                    color: AppColors.textFaint,
-                    size: 34,
-                  ),
+      child: Stack(
+        fit: StackFit.expand,
+        children: [
+          Image.memory(
+            bytes,
+            fit: BoxFit.cover,
+            cacheWidth: 1080,
+            errorBuilder: (_, _, _) => const ColoredBox(
+              color: AppColors.surfaceElevated,
+              child: Center(
+                child: Icon(
+                  Icons.broken_image_rounded,
+                  color: AppColors.textFaint,
+                  size: 34,
                 ),
               ),
             ),
-            const DecoratedBox(
-              decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  begin: Alignment.topCenter,
-                  end: Alignment.bottomCenter,
-                  colors: [Color(0x4D000000), Color(0x00000000), Color(0x66000000)],
-                ),
+          ),
+          const DecoratedBox(
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topCenter,
+                end: Alignment.bottomCenter,
+                colors: [
+                  Color(0x3D000000),
+                  Color(0x00000000),
+                  Color(0xA6000000),
+                ],
+                stops: [0.0, 0.55, 1.0],
               ),
             ),
-            Positioned(
-              left: 12,
-              bottom: 12,
+          ),
+          Positioned(
+            left: 12,
+            right: 64,
+            bottom: 12,
+            child: Align(
+              alignment: Alignment.centerLeft,
               child: Container(
                 padding:
-                    const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                    const EdgeInsets.symmetric(horizontal: 11, vertical: 7),
                 decoration: BoxDecoration(
-                  color: const Color(0x99000000),
+                  color: const Color(0xB3000000),
                   borderRadius: BorderRadius.circular(999),
                   border: Border.all(color: const Color(0x26FFFFFF)),
                 ),
-                child: const Text(
-                  'COVER PHOTO',
-                  style: TextStyle(
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(
+                      found
+                          ? Icons.gps_fixed_rounded
+                          : Icons.location_off_rounded,
+                      color:
+                          found ? AppColors.success : AppColors.textSecondary,
+                      size: 14,
+                    ),
+                    const SizedBox(width: 6),
+                    Flexible(
+                      child: Text(
+                        found ? 'GPS · $location' : 'No GPS data',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 11.5,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+          Positioned(
+            top: 10,
+            right: 10,
+            child: Semantics(
+              button: true,
+              label: 'Remove photo',
+              child: IconButton(
+                onPressed: onClear,
+                tooltip: 'Remove photo',
+                icon: Container(
+                  padding: const EdgeInsets.all(7),
+                  decoration: const BoxDecoration(
+                    color: Color(0x99000000),
+                    shape: BoxShape.circle,
+                  ),
+                  child: const Icon(
+                    Icons.close_rounded,
                     color: Colors.white,
-                    fontSize: 10,
-                    fontWeight: FontWeight.w800,
-                    letterSpacing: 1.2,
+                    size: 19,
                   ),
                 ),
               ),
             ),
-            Positioned(
-              top: 10,
-              right: 10,
-              child: Semantics(
-                button: true,
-                label: 'Remove photo',
-                child: IconButton(
-                  onPressed: onClear,
-                  tooltip: 'Remove photo',
-                  icon: Container(
-                    padding: const EdgeInsets.all(7),
-                    decoration: const BoxDecoration(
-                      color: Color(0x99000000),
-                      shape: BoxShape.circle,
-                    ),
-                    child: const Icon(
-                      Icons.close_rounded,
-                      color: Colors.white,
-                      size: 19,
-                    ),
-                  ),
-                ),
-              ),
-            ),
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }
@@ -897,26 +951,56 @@ class _PhotoLocationNote extends StatelessWidget {
     final icon = !hasPhoto
         ? Icons.auto_awesome_rounded
         : found
-            ? Icons.location_on_rounded
+            ? Icons.gps_fixed_rounded
             : Icons.location_off_rounded;
-    final color = found ? AppColors.success : AppColors.textSecondary;
-    final text = !hasPhoto
-        ? 'If your photo has GPS data, we place the pin for you.'
+    final color = !hasPhoto
+        ? AppColors.textSecondary
         : found
-            ? 'Location found in this photo — set on the next step.'
-            : 'No location saved in this photo. Drop the pin yourself.';
+            ? AppColors.success
+            : AppColors.textSecondary;
+    final title = !hasPhoto
+        ? 'Location from your photo'
+        : found
+            ? 'Location found'
+            : 'No location in this photo';
+    final body = !hasPhoto
+        ? 'If the original file has GPS data, the pin is placed for you.'
+        : found
+            ? '${location!} — the pin is already placed, and you can still move it.'
+            : 'Drag the map or use My location on the next step.';
 
-    return Row(
-      children: [
-        Icon(icon, color: color, size: 17),
-        const SizedBox(width: 8),
-        Expanded(
-          child: Text(
-            text,
-            style: theme.bodySmall?.copyWith(color: color),
-          ),
+    return Container(
+      padding: const EdgeInsets.all(13),
+      decoration: BoxDecoration(
+        color: found ? const Color(0x1434C759) : AppColors.surface,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: found ? const Color(0x3334C759) : AppColors.hairline,
         ),
-      ],
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Padding(
+            padding: const EdgeInsets.only(top: 1),
+            child: Icon(icon, color: color, size: 18),
+          ),
+          const SizedBox(width: 11),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title,
+                  style: theme.titleSmall?.copyWith(fontSize: 13.5),
+                ),
+                const SizedBox(height: 2),
+                Text(body, style: theme.bodySmall?.copyWith(fontSize: 11.5)),
+              ],
+            ),
+          ),
+        ],
+      ),
     );
   }
 }
@@ -943,10 +1027,10 @@ class _PhotoSourceButton extends StatelessWidget {
           : 'Choose a photo from the gallery',
       onTap: onTap,
       child: Container(
-        height: 48,
+        height: 50,
         decoration: BoxDecoration(
           color: filled ? AppColors.action : const Color(0x14FFFFFF),
-          borderRadius: BorderRadius.circular(999),
+          borderRadius: BorderRadius.circular(14),
           border: Border.all(
             color: filled ? AppColors.action : AppColors.hairline,
           ),

@@ -47,6 +47,7 @@ class SpotPin extends StatelessWidget {
               width: head * 1.5,
               height: head * 1.5,
               iconSize: 16,
+              cacheWidth: 128,
             ),
           )
         : Icon(

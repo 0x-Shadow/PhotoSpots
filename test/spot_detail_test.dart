@@ -1,13 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:photospot/data/spot_repository.dart';
 import 'package:photospot/screens/spot_detail_screen.dart';
-import 'package:photospot/state/app_state.dart';
-import 'package:photospot/state/settings_state.dart';
-import 'package:photospot/theme/app_theme.dart';
-import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+
+import 'helpers/test_harness.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -18,18 +15,7 @@ void main() {
 
   Future<void> pumpDetail(WidgetTester tester) async {
     await tester.pumpWidget(
-      MultiProvider(
-        providers: [
-          ChangeNotifierProvider(
-            create: (_) => AppState(MockSpotRepository())..load(),
-          ),
-          ChangeNotifierProvider(create: (_) => SettingsState()..load()),
-        ],
-        child: MaterialApp(
-          theme: AppTheme.dark,
-          home: const SpotDetailScreen(spotId: 'senhora-monte'),
-        ),
-      ),
+      testApp(home: const SpotDetailScreen(spotId: 'senhora-monte')),
     );
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 500));

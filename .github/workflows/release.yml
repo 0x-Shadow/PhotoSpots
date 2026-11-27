@@ -65,6 +65,14 @@ jobs:
           channel: stable
           cache: true
 
+      # Never publish a build the checks have not seen. A release is the one
+      # artifact users install, so a red analyze or test run must stop here.
+      - name: Analyze and test
+        run: |
+          flutter pub get
+          flutter analyze
+          flutter test
+
       # Every release must be signed with the same long-lived key, otherwise
       # Android refuses to install the update over the previous version.
       - name: Configure release signing

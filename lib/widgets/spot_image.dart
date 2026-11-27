@@ -12,6 +12,7 @@ class SpotImage extends StatelessWidget {
     this.width,
     this.height,
     this.iconSize = 22,
+    this.cacheWidth,
   });
 
   final SpotPhoto photo;
@@ -20,8 +21,16 @@ class SpotImage extends StatelessWidget {
   final double? height;
   final double iconSize;
 
+  /// Decode width in pixels. Without it a 30px map pin decodes the full
+  /// multi-megapixel photo, which is the main cost of a busy map.
+  final int? cacheWidth;
+
   @override
   Widget build(BuildContext context) {
+    final decodeWidth = cacheWidth ??
+        (width == null
+            ? null
+            : (width! * MediaQuery.devicePixelRatioOf(context)).round());
     final placeholder = Container(
       width: width,
       height: height,
@@ -40,6 +49,8 @@ class SpotImage extends StatelessWidget {
         fit: fit,
         width: width,
         height: height,
+        cacheWidth: decodeWidth,
+        gaplessPlayback: true,
         errorBuilder: (_, _, _) => placeholder,
       );
     }
@@ -49,6 +60,8 @@ class SpotImage extends StatelessWidget {
       fit: fit,
       width: width,
       height: height,
+      cacheWidth: decodeWidth,
+      gaplessPlayback: true,
       errorBuilder: (_, _, _) => placeholder,
     );
   }

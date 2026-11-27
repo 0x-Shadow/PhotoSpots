@@ -1,3 +1,4 @@
+import 'dart:math' as math;
 import 'dart:typed_data';
 
 /// GPS coordinates embedded in a photo by the camera.
@@ -24,20 +25,65 @@ class PhotoLocation {
   int get hashCode => Object.hash(latitude, longitude);
 }
 
-/// Reads the GPS block a camera writes into a JPEG's EXIF segment.
+/// Reads the GPS block a camera writes into a photo's EXIF metadata.
 ///
-/// Pure Dart and dependency-free: it walks the JPEG marker stream to the APP1
-/// segment, parses the TIFF header and IFD0, follows the GPS IFD pointer, and
-/// converts the three DMS rationals into decimal degrees. Anything unexpected
-/// (PNG, stripped metadata, corrupt offsets) simply returns null — detecting a
-/// location is a bonus, never a requirement.
+/// Pure Dart and dependency-free. It understands the containers phones actually
+/// produce:
+///
+/// * JPEG — walks the marker stream to APP1/Exif.
+/// * HEIC/HEIF (iPhone and many Androids) — finds the Exif payload inside the
+///   `meta` box data.
+/// * PNG — reads the `eXIf` chunk.
+/// * WebP — reads the `EXIF` chunk.
+/// * Anything else (or an unexpected layout) — falls back to scanning the
+///   buffer for an `Exif\0\0` header.
+///
+/// Anything unreadable simply returns null: detecting a location is a bonus,
+/// never a requirement.
 class PhotoMetadata {
   PhotoMetadata._();
 
+  /// The bytes scanned when looking for an Exif header. EXIF blocks live in
+  /// the first few megabytes even in large HEIC files, so the cap keeps a
+  /// multi-megabyte fallback scan off the jank path.
+  static const int _scanLimit = 8 << 20;
+
   static PhotoLocation? readGps(Uint8List bytes) {
     if (bytes.length < 4) return null;
-    if (bytes[0] != 0xFF || bytes[1] != 0xD8) return null;
 
+    // JPEG: read APP1 properly first so a file with several segments is fast.
+    if (bytes[0] == 0xFF && bytes[1] == 0xD8) {
+      final segment = _readJpegExif(bytes);
+      if (segment != null) return segment;
+    }
+
+    if (_isPng(bytes)) {
+      final tiff = _readPngExif(bytes);
+      if (tiff != null) {
+        final location = _readTiff(tiff);
+        if (location != null) return location;
+      }
+    }
+
+    if (_isWebp(bytes)) {
+      final tiff = _readWebpExif(bytes);
+      if (tiff != null) {
+        final location = _readTiff(tiff);
+        if (location != null) return location;
+      }
+    }
+
+    // HEIC/HEIF, and any JPEG/PNG whose segment layout surprised us: the Exif
+    // payload always carries its own header, so search for it wherever it is.
+    return _scanForExif(bytes);
+  }
+
+  // ---------------------------------------------------------------------------
+  // Containers
+  // ---------------------------------------------------------------------------
+
+  /// Walks JPEG markers until an APP1/Exif segment is found.
+  static PhotoLocation? _readJpegExif(Uint8List bytes) {
     var offset = 2;
     while (offset + 4 <= bytes.length) {
       if (bytes[offset] != 0xFF) {
@@ -62,13 +108,7 @@ class PhotoMetadata {
       final segmentEnd = offset + 2 + length;
       if (segmentEnd > bytes.length) return null;
 
-      if (marker == 0xE1 &&
-          segmentStart + 6 <= segmentEnd &&
-          bytes[segmentStart] == 0x45 && // E
-          bytes[segmentStart + 1] == 0x78 && // x
-          bytes[segmentStart + 2] == 0x69 && // i
-          bytes[segmentStart + 3] == 0x66 && // f
-          bytes[segmentStart + 4] == 0x00) {
+      if (marker == 0xE1 && _hasExifHeader(bytes, segmentStart, segmentEnd)) {
         return _readTiff(
           Uint8List.sublistView(bytes, segmentStart + 6, segmentEnd),
         );
@@ -77,6 +117,92 @@ class PhotoMetadata {
     }
     return null;
   }
+
+  static bool _isPng(Uint8List bytes) =>
+      bytes.length > 8 &&
+      bytes[0] == 0x89 &&
+      bytes[1] == 0x50 &&
+      bytes[2] == 0x4E &&
+      bytes[3] == 0x47;
+
+  /// Reads the `eXIf` chunk of a PNG, whose payload is a bare TIFF block.
+  static Uint8List? _readPngExif(Uint8List bytes) {
+    var offset = 8;
+    while (offset + 8 <= bytes.length) {
+      final length = _u32(bytes, offset, Endian.big);
+      if (length <= 0 || offset + 12 + length > bytes.length) return null;
+      final type = bytes[offset + 4];
+      // 'eXIf'
+      if (type == 0x65 &&
+          bytes[offset + 5] == 0x58 &&
+          bytes[offset + 6] == 0x49 &&
+          bytes[offset + 7] == 0x66) {
+        return Uint8List.sublistView(bytes, offset + 8, offset + 8 + length);
+      }
+      offset += 12 + length; // length + type + data + CRC
+    }
+    return null;
+  }
+
+  static bool _isWebp(Uint8List bytes) =>
+      bytes.length > 12 &&
+      bytes[0] == 0x52 && // R
+      bytes[1] == 0x49 && // I
+      bytes[2] == 0x46 && // F
+      bytes[3] == 0x46 && // F
+      bytes[8] == 0x57 && // W
+      bytes[9] == 0x45 && // E
+      bytes[10] == 0x42 && // B
+      bytes[11] == 0x50; // P
+
+  /// Reads the `EXIF` chunk of a WebP, whose payload is a bare TIFF block.
+  static Uint8List? _readWebpExif(Uint8List bytes) {
+    var offset = 12;
+    while (offset + 8 <= bytes.length) {
+      final type = String.fromCharCodes(bytes.sublist(offset, offset + 4));
+      final length = _u32(bytes, offset + 4, Endian.little);
+      if (length < 0 || offset + 8 + length > bytes.length) return null;
+      if (type == 'EXIF') {
+        var start = offset + 8;
+        // Some writers keep the "Exif\0\0" header inside the chunk.
+        if (start + 6 <= bytes.length && _hasExifHeader(bytes, start, start + 6)) {
+          start += 6;
+        }
+        return Uint8List.sublistView(bytes, start, offset + 8 + length);
+      }
+      offset += 8 + length + (length.isOdd ? 1 : 0);
+    }
+    return null;
+  }
+
+  /// Searches the buffer for an `Exif\0\0` header and parses the TIFF block
+  /// that follows. This is what makes HEIC/HEIF photos work.
+  static PhotoLocation? _scanForExif(Uint8List bytes) {
+    final end = math.min(bytes.length, _scanLimit);
+    final last = end - 6;
+    for (var i = 0; i <= last; i++) {
+      if (bytes[i] != 0x45) continue; // 'E'
+      if (!_hasExifHeader(bytes, i, end)) continue;
+      final tiff = Uint8List.sublistView(bytes, i + 6, end);
+      final location = _readTiff(tiff);
+      if (location != null) return location;
+    }
+    return null;
+  }
+
+  static bool _hasExifHeader(Uint8List bytes, int start, int end) {
+    if (start + 6 > end || start < 0) return false;
+    return bytes[start] == 0x45 && // E
+        bytes[start + 1] == 0x78 && // x
+        bytes[start + 2] == 0x69 && // i
+        bytes[start + 3] == 0x66 && // f
+        bytes[start + 4] == 0x00 &&
+        bytes[start + 5] == 0x00;
+  }
+
+  // ---------------------------------------------------------------------------
+  // TIFF / EXIF
+  // ---------------------------------------------------------------------------
 
   static PhotoLocation? _readTiff(Uint8List tiff) {
     if (tiff.length < 8) return null;

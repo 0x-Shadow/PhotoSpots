@@ -8,26 +8,16 @@ import 'package:photospot/map/tile_sources.dart';
 import 'package:photospot/services/update_service.dart';
 import 'package:photospot/state/app_state.dart';
 import 'package:photospot/state/location_outcome.dart';
-import 'package:photospot/state/settings_state.dart';
 import 'package:photospot/theme/app_animations.dart';
-import 'package:photospot/theme/app_theme.dart';
 import 'package:photospot/widgets/location_prompt.dart';
 import 'package:photospot/widgets/spot_mini_map.dart';
 import 'package:photospot/widgets/update_sheet.dart';
-import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-Widget _withProviders(Widget home, {AppState? app}) {
-  return MultiProvider(
-    providers: [
-      ChangeNotifierProvider.value(
-        value: app ?? AppState(MockSpotRepository())..load(),
-      ),
-      ChangeNotifierProvider(create: (_) => SettingsState()..load()),
-    ],
-    child: MaterialApp(theme: AppTheme.dark, home: home),
-  );
-}
+import 'helpers/test_harness.dart';
+
+Widget _withProviders(Widget home, {AppState? app}) =>
+    testApp(home: home, appState: app);
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();

@@ -47,6 +47,13 @@ class _MapScreenState extends State<MapScreen> {
   LatLng? _lastCenteredLocation;
   DateTime? _lastMarkerTap;
 
+  /// Marker culling. Every pin is a widget tree plus an image decode, so only
+  /// the pins inside a padded viewport are built. The buffer is deliberately
+  /// larger than the screen so panning does not rebuild on every frame; it is
+  /// only recomputed once the camera leaves the buffered area.
+  LatLngBounds? _bufferedBounds;
+  bool _showPhotoPins = true;
+
   /// The basemap actually rendered: the preferred style unless the probe
   /// found it unusable and the session fell back.
   MapStyle _activeStyle = TileSources.dark;
@@ -146,6 +153,72 @@ class _MapScreenState extends State<MapScreen> {
 
   /// The selected spot, but only while it is visible under the active filter
   /// and search query.
+  /// Rebuilds the marker set only when the camera leaves the buffered area,
+  /// not on every pan frame. Photo pins also drop out when zoomed far out,
+  /// where the thumbnail is too small to read anyway.
+  void _onCameraChanged(MapCamera camera) {
+    if (!_mapReady) return;
+    final buffered = _bufferedBounds;
+    if (buffered != null && buffered.containsBounds(camera.visibleBounds)) {
+      final photos = _photosAreUseful(camera.zoom);
+      if (photos != _showPhotoPins) {
+        setState(() => _showPhotoPins = photos);
+      }
+      return;
+    }
+    setState(() {
+      _bufferedBounds = _buffered(camera.visibleBounds);
+      _showPhotoPins = _photosAreUseful(camera.zoom);
+    });
+  }
+
+  static bool _photosAreUseful(double zoom) => zoom >= 11;
+
+  /// Pads the viewport by a third in each direction so a normal pan stays
+  /// inside the already-built marker set.
+  static LatLngBounds _buffered(LatLngBounds bounds) {
+    final latPad = (bounds.north - bounds.south) * 0.35;
+    final lngPad = (bounds.east - bounds.west) * 0.35;
+    return LatLngBounds(
+      LatLng(
+        (bounds.south - latPad).clamp(-85.0, 85.0),
+        (bounds.west - lngPad).clamp(-180.0, 180.0),
+      ),
+      LatLng(
+        (bounds.north + latPad).clamp(-85.0, 85.0),
+        (bounds.east + lngPad).clamp(-180.0, 180.0),
+      ),
+    );
+  }
+
+  /// The subset of [spots] whose pins are worth building right now. The
+  /// selected spot is always kept so its card never outlives its pin.
+  List<Spot> _visibleInViewport(List<Spot> spots) {
+    final bounds = _bufferedBounds;
+    if (bounds == null) return spots;
+    var visible = <Spot>[];
+    for (final spot in spots) {
+      if (bounds.contains(spot.location)) visible.add(spot);
+    }
+    // A dense city should never build thousands of pins in one frame. The best
+    // rated survive; the selected spot is re-added below so its pin never
+    // disappears from under its own card.
+    if (visible.length > 260) {
+      visible.sort((a, b) => b.rating.compareTo(a.rating));
+      visible = visible.sublist(0, 260);
+    }
+    final selected = _selectedId;
+    if (selected != null && !visible.any((spot) => spot.id == selected)) {
+      for (final spot in spots) {
+        if (spot.id == selected) {
+          visible.add(spot);
+          break;
+        }
+      }
+    }
+    return visible;
+  }
+
   Spot? _selectedIn(List<Spot> spots) {
     if (_selectedId == null) return null;
     for (final spot in spots) {
@@ -273,8 +346,9 @@ class _MapScreenState extends State<MapScreen> {
   Widget build(BuildContext context) {
     final state = context.watch<AppState>();
     final settings = context.watch<SettingsState>();
-    final spots = _visible(state);
-    final selected = _selectedIn(spots);
+    final allSpots = _visible(state);
+    final spots = _visibleInViewport(allSpots);
+    final selected = _selectedIn(allSpots);
     final origin = state.referenceLocation;
     _centerOnUserOnce(state);
 
@@ -298,8 +372,14 @@ class _MapScreenState extends State<MapScreen> {
                     InteractiveFlag.doubleTapZoom |
                     InteractiveFlag.flingAnimation,
               ),
+              onPositionChanged: (camera, _) => _onCameraChanged(camera),
               onMapReady: () {
-                setState(() => _mapReady = true);
+                final camera = _mapController.camera;
+                setState(() {
+                  _mapReady = true;
+                  _bufferedBounds = _buffered(camera.visibleBounds);
+                  _showPhotoPins = _photosAreUseful(camera.zoom);
+                });
                 final focus = _pendingFocus;
                 if (focus != null) {
                   _pendingFocus = null;
@@ -348,7 +428,7 @@ class _MapScreenState extends State<MapScreen> {
                       _spotMarker(
                         spot: spot,
                         selected: false,
-                        showPhoto: settings.mapPhotoPins,
+                        showPhoto: settings.mapPhotoPins && _showPhotoPins,
                       ),
                   for (final spot in spots)
                     if (spot.id == _selectedId)
@@ -579,7 +659,7 @@ class _MapScreenState extends State<MapScreen> {
           ),
         ),
 
-        // One glass control column: fit all pins, share my location, go to my
+        // One control column: fit all pins, share my location, go to my
         // location. It lifts above the spot card so the two never overlap.
         AnimatedPositioned(
           duration: AppMotion.quick,
@@ -588,13 +668,13 @@ class _MapScreenState extends State<MapScreen> {
           bottom: selected != null ? 188 : 76,
           child: Column(
             children: [
-              if (spots.length > 1)
+              if (allSpots.length > 1)
                 _MapControl(
                   icon: Icons.fit_screen_rounded,
                   semanticLabel: 'Fit all spots on the map',
-                  onTap: () => _fitSpots(spots),
+                  onTap: () => _fitSpots(allSpots),
                 ),
-              if (spots.length > 1) const SizedBox(height: 8),
+              if (allSpots.length > 1) const SizedBox(height: 8),
               if (state.hasReferenceFix)
                 _MapControl(
                   icon: Icons.ios_share_rounded,
@@ -620,7 +700,7 @@ class _MapScreenState extends State<MapScreen> {
           ),
         ),
 
-        if (spots.isEmpty)
+        if (allSpots.isEmpty)
           Positioned(
             top: 130,
             left: 24,
@@ -702,6 +782,26 @@ class _MapScreenState extends State<MapScreen> {
     final height =
         selected ? MapPinMetrics.selectedHeight : MapPinMetrics.height;
 
+    final pin = SpotPin(
+      spot: spot,
+      selected: selected,
+      showPhoto: showPhoto,
+    );
+
+    // Only the active pin animates. A TweenAnimationBuilder per marker would
+    // spawn a ticker for every pin on the map and rebuild them all on each
+    // camera settle.
+    final Widget child = selected
+        ? TweenAnimationBuilder<double>(
+            duration: AppMotion.quick,
+            curve: AppMotion.easeOut,
+            tween: Tween(begin: 0.82, end: 1.0),
+            builder: (context, scale, pin) =>
+                Transform.scale(scale: scale, child: pin),
+            child: pin,
+          )
+        : pin;
+
     // The tail tip is the anchor, so the pin points at the coordinate.
     return Marker(
       point: spot.location,
@@ -716,18 +816,7 @@ class _MapScreenState extends State<MapScreen> {
           _moveMap(spot.location, 15);
         },
         behavior: HitTestBehavior.opaque,
-        child: TweenAnimationBuilder<double>(
-          duration: AppMotion.quick,
-          curve: AppMotion.easeOut,
-          tween: Tween(begin: selected ? 0.82 : 0.96, end: 1.0),
-          builder: (context, scale, child) =>
-              Transform.scale(scale: scale, child: child),
-          child: SpotPin(
-            spot: spot,
-            selected: selected,
-            showPhoto: showPhoto,
-          ),
-        ),
+        child: child,
       ),
     );
   }

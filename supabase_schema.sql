@@ -1,6 +1,14 @@
 -- Run this in your Supabase SQL editor.
 -- PhotoSpot database schema (free tier).
 --
+-- Apply in this order, and re-run any of them whenever you like:
+--   1. supabase_schema.sql      (this file)
+--   2. supabase_engagement.sql  (likes, comments)
+--   3. supabase_fix.sql         (de-duplication repair, storage policies)
+-- Every statement is idempotent and every policy is written in its hardened
+-- form here, so re-running a script can never widen a policy that a later
+-- script tightened.
+--
 -- After running it:
 --   1. Authentication → Providers → enable "Anonymous sign-ins" so the app can
 --      save, view, and publish without a login screen.
@@ -31,6 +39,10 @@ create policy "Users can insert their own profile"
 drop policy if exists "Users can update own profile" on profiles;
 create policy "Users can update own profile"
   on profiles for update using ( auth.uid() = id );
+
+drop policy if exists "Users can delete own profile" on profiles;
+create policy "Users can delete own profile"
+  on profiles for delete using ( auth.uid() = id );
 
 -- Every new auth user (including anonymous sessions) gets a profile row, so
 -- spots.submitted_by and photos.uploader foreign keys always resolve.
@@ -77,6 +89,27 @@ create table if not exists spots (
 
 alter table spots enable row level security;
 
+-- Values a client cannot talk its way out of. `not valid` keeps the migration
+-- runnable over historical rows while still rejecting new bad writes.
+alter table spots drop constraint if exists spots_title_len;
+alter table spots add constraint spots_title_len
+  check (char_length(btrim(title)) between 1 and 120) not valid;
+alter table spots drop constraint if exists spots_city_len;
+alter table spots add constraint spots_city_len
+  check (char_length(btrim(city)) between 1 and 80) not valid;
+alter table spots drop constraint if exists spots_latitude_range;
+alter table spots add constraint spots_latitude_range
+  check (latitude between -90 and 90) not valid;
+alter table spots drop constraint if exists spots_longitude_range;
+alter table spots add constraint spots_longitude_range
+  check (longitude between -180 and 180) not valid;
+alter table spots drop constraint if exists spots_rating_range;
+alter table spots add constraint spots_rating_range
+  check (rating between 0 and 5) not valid;
+alter table spots drop constraint if exists spots_counts_nonnegative;
+alter table spots add constraint spots_counts_nonnegative
+  check (save_count >= 0 and view_count >= 0) not valid;
+
 drop policy if exists "Spots are viewable by everyone" on spots;
 create policy "Spots are viewable by everyone"
   on spots for select using ( true );
@@ -88,6 +121,22 @@ create policy "Authenticated users can insert spots"
 drop policy if exists "Users can update own spots" on spots;
 create policy "Users can update own spots"
   on spots for update using ( auth.uid() = submitted_by );
+
+drop policy if exists "Users can delete own spots" on spots;
+create policy "Users can delete own spots"
+  on spots for delete using ( auth.uid() = submitted_by );
+
+-- Column-level privileges are the only way to stop a crafted request from
+-- writing rating or the engagement counters: the RLS policy only says *which
+-- row*, never *which columns*. Table-wide INSERT/UPDATE is revoked and then
+-- granted back for exactly the fields a person may set.
+revoke insert, update on spots from anon, authenticated;
+grant insert (
+  title, description, city, latitude, longitude, tags, best_time, submitted_by
+) on spots to anon, authenticated;
+grant update (
+  title, description, city, latitude, longitude, tags, best_time
+) on spots to anon, authenticated;
 
 -- ---------------------------------------------------------------------------
 -- Photos
@@ -111,6 +160,10 @@ create policy "Photos are viewable by everyone"
 drop policy if exists "Authenticated users can insert photos" on photos;
 create policy "Authenticated users can insert photos"
   on photos for insert with check ( auth.uid() = uploader );
+
+drop policy if exists "Photo owners can delete rows" on photos;
+create policy "Photo owners can delete rows"
+  on photos for delete using ( auth.uid() = uploader );
 
 -- ---------------------------------------------------------------------------
 -- Saves
@@ -148,13 +201,28 @@ create table if not exists spot_views (
 
 alter table spot_views enable row level security;
 
+-- One view per person per spot. Views feed the ranking, so unauthenticated or
+-- repeated inserts used to be an unbounded way to inflate a spot. Existing
+-- spam and duplicates are cleared before the constraint is added.
+delete from spot_views where viewer is null;
+delete from spot_views a using spot_views b
+ where a.viewer = b.viewer
+   and a.spot_id = b.spot_id
+   and a.id > b.id;
+create unique index if not exists spot_views_spot_viewer_key
+  on spot_views (spot_id, viewer);
+alter table spot_views alter column viewer set default auth.uid();
+alter table spot_views alter column viewer set not null;
+
 drop policy if exists "Anyone can insert spot views" on spot_views;
-create policy "Anyone can insert spot views"
-  on spot_views for insert with check ( true );
+drop policy if exists "Users can insert own spot views" on spot_views;
+create policy "Users can insert own spot views"
+  on spot_views for insert with check ( auth.uid() = viewer );
 
 drop policy if exists "Anyone can view spot views" on spot_views;
-create policy "Anyone can view spot views"
-  on spot_views for select using ( true );
+drop policy if exists "Users can view own spot views" on spot_views;
+create policy "Users can view own spot views"
+  on spot_views for select using ( auth.uid() = viewer );
 
 -- ---------------------------------------------------------------------------
 -- Server-owned counters
@@ -207,7 +275,13 @@ create unique index if not exists spots_title_city_key on spots (title, city);
 create index if not exists spots_tags_idx on spots using gin (tags);
 create index if not exists spots_created_at_idx on spots (created_at desc);
 create index if not exists photos_spot_id_idx on photos (spot_id);
+create index if not exists photos_uploader_idx on photos (uploader);
 create index if not exists spot_views_spot_id_idx on spot_views (spot_id);
+create index if not exists spot_views_viewer_idx on spot_views (viewer);
+create index if not exists saves_spot_id_idx on saves (spot_id);
+create index if not exists spots_submitted_by_idx on spots (submitted_by);
+create index if not exists spots_city_idx on spots (city);
+create index if not exists spots_location_idx on spots (latitude, longitude);
 
 -- ---------------------------------------------------------------------------
 -- Storage policies for the public "photos" bucket
@@ -221,7 +295,10 @@ create policy "Public photo reads"
 drop policy if exists "Authenticated photo uploads" on storage.objects;
 create policy "Authenticated photo uploads"
   on storage.objects for insert to authenticated
-  with check ( bucket_id = 'photos' );
+  with check (
+    bucket_id = 'photos'
+    and lower(storage.extension(name)) in ('jpg','jpeg','png','webp','heic','heif')
+  );
 
 drop policy if exists "Photo owners can update" on storage.objects;
 create policy "Photo owners can update"

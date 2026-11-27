@@ -28,5 +28,11 @@
 	<string>MainMenu</string>
 	<key>NSPrincipalClass</key>
 	<string>NSApplication</string>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>PhotoSpot uses your location to show photo spots near you and to center the map.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>PhotoSpot needs photo library access so you can add a photo when publishing a spot.</string>
+	<key>NSCameraUsageDescription</key>
+	<string>PhotoSpot needs camera access so you can capture a spot photo.</string>
 </dict>
 </plist>

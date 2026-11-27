@@ -3,10 +3,9 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:photospot/data/spot_repository.dart';
 import 'package:photospot/screens/map_screen.dart';
 import 'package:photospot/state/app_state.dart';
-import 'package:photospot/state/settings_state.dart';
-import 'package:photospot/theme/app_theme.dart';
-import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+
+import 'helpers/test_harness.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -20,15 +19,9 @@ void main() {
   ) async {
     final appState = AppState(MockSpotRepository());
     await tester.pumpWidget(
-      MultiProvider(
-        providers: [
-          ChangeNotifierProvider.value(value: appState),
-          ChangeNotifierProvider(create: (_) => SettingsState()..load()),
-        ],
-        child: MaterialApp(
-          theme: AppTheme.dark,
-          home: const Scaffold(body: MapScreen()),
-        ),
+      testApp(
+        appState: appState,
+        home: const Scaffold(body: MapScreen()),
       ),
     );
     await tester.pump();

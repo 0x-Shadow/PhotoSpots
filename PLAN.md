@@ -14,13 +14,15 @@ list reveals, with reduced-motion support.
   wide screens).
 - Home: trending spot, four category tiles, top picks nearby (real distance
   ordering), live search screen.
-- Map: category icon pins, filter chips, sorting (nearest/rated/saved),
-  location button, floating spot card, save toggle.
+- Map: category icon pins culled to the viewport, filter chips, sorting
+  (nearest/rated/saved), location button, floating spot card, save toggle.
 - Spot detail: gallery, facts, description, photo strip, tags, share (clipboard
   link), directions (platform maps), save.
 - Saved: sorting, swipe-to-remove, local persistence across restarts.
-- Publish: four steps, photo required, gallery picker pinned map, review, upload
-  to Supabase Storage when configured; bytes are kept locally in demo mode.
+- Publish: three steps (photo → location → details), photo required, EXIF GPS
+  places the pin when present, gallery picker plus a draggable map, review,
+  downscaled upload to Supabase Storage when configured; bytes are kept locally
+  in demo mode.
 - Profile: real stats, preferences (updates/units/map pins), app settings and
   manual update check, plan-your-trip itinerary.
 - Updates: public GitHub release check on launch with 24h snooze; tag-driven
@@ -34,9 +36,11 @@ when a session exists.
 
 ### Verification
 - `flutter analyze` — clean
-- `flutter test` — 19 tests passing (ranking, persistence, submit bytes,
-  version comparison, responsive flows)
+- `flutter test` — 83 tests passing (ranking, persistence, submit bytes,
+  EXIF GPS, version comparison, responsive flows)
 - `flutter build web --release` — succeeds
+- CI runs analyze, tests, and a web build on every PR and push to `main`; the
+  release workflow runs the same checks before it will publish an APK.
 
 ### Known constraint
 The in-app update check needs a public release channel. The GitHub repo must be

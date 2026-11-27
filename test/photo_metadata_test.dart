@@ -89,6 +89,45 @@ Uint8List _jpegWithGps({
   ]);
 }
 
+/// The raw `Exif\0\0` + TIFF block from the generated JPEG.
+Uint8List _exifBlock() {
+  final bytes = _jpegWithGps();
+  const signature = [0x45, 0x78, 0x69, 0x66, 0x00, 0x00];
+  for (var i = 0; i + signature.length <= bytes.length; i++) {
+    var match = true;
+    for (var j = 0; j < signature.length; j++) {
+      if (bytes[i + j] != signature[j]) {
+        match = false;
+        break;
+      }
+    }
+    if (match) {
+      return Uint8List.fromList(bytes.sublist(i, bytes.length - 2));
+    }
+  }
+  throw StateError('no Exif block in the fixture');
+}
+
+/// Wraps the TIFF block in a minimal PNG with an `eXIf` chunk.
+Uint8List _pngWithGps() {
+  final tiff = _exifBlock().sublist(6);
+  final chunk = <int>[];
+  final length = tiff.length;
+  chunk.addAll([
+    (length >> 24) & 0xFF,
+    (length >> 16) & 0xFF,
+    (length >> 8) & 0xFF,
+    length & 0xFF,
+    0x65, 0x58, 0x49, 0x66, // eXIf
+    ...tiff,
+    0, 0, 0, 0, // CRC
+  ]);
+  return Uint8List.fromList([
+    0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A,
+    ...chunk,
+  ]);
+}
+
 void main() {
   test('reads decimal degrees from a JPEG EXIF GPS block', () {
     final location = PhotoMetadata.readGps(_jpegWithGps());
@@ -106,6 +145,30 @@ void main() {
     expect(location, isNotNull);
     expect(location!.latitude, lessThan(0));
     expect(location.longitude, greaterThan(0));
+  });
+
+  test('reads GPS from a HEIC-style file with the Exif payload inline', () {
+    final exif = _exifBlock();
+    final bytes = Uint8List.fromList([
+      // A box header and some item data, as a HEIC stores it.
+      0x00, 0x00, 0x00, 0x18, 0x66, 0x74, 0x79, 0x70,
+      0x68, 0x65, 0x69, 0x63, 0x00, 0x00, 0x00, 0x00,
+      ...exif,
+    ]);
+
+    final location = PhotoMetadata.readGps(bytes);
+
+    expect(location, isNotNull);
+    expect(location!.latitude, closeTo(38.72, 0.001));
+    expect(location.longitude, closeTo(-9.1394, 0.001));
+  });
+
+  test('reads GPS from a PNG eXIf chunk', () {
+    final location = PhotoMetadata.readGps(_pngWithGps());
+
+    expect(location, isNotNull);
+    expect(location!.latitude, closeTo(38.72, 0.001));
+    expect(location.longitude, closeTo(-9.1394, 0.001));
   });
 
   test('returns null without EXIF, for other formats, and for junk', () {

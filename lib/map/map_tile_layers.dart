@@ -66,7 +66,12 @@ class MapTileLayersState extends State<MapTileLayers> {
 
   @override
   Widget build(BuildContext context) {
-    final retina = RetinaMode.isHighDensity(context);
+    // Only ask for @2x tiles when the server actually serves them. On a
+    // template without `{r}` flutter_map "simulates" retina by loading the
+    // next zoom level and scaling it down — four times the tiles and decode
+    // work, which is what makes a phone map crawl. Esri and OSM have no @2x.
+    final retina = RetinaMode.isHighDensity(context) &&
+        _style.urlTemplate.contains('{r}');
     final base = TileLayer(
       urlTemplate: _style.urlTemplate,
       subdomains: _style.subdomains,

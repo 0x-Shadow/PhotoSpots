@@ -1,13 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:photospot/data/spot_repository.dart';
 import 'package:photospot/screens/root_shell.dart';
-import 'package:photospot/state/app_state.dart';
-import 'package:photospot/state/settings_state.dart';
-import 'package:photospot/theme/app_theme.dart';
 import 'package:photospot/widgets/place_card.dart';
-import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+
+import 'helpers/test_harness.dart';
 
 void _pop(WidgetTester tester) {
   tester.state<NavigatorState>(find.byType(Navigator).first).pop();
@@ -28,17 +25,7 @@ void main() {
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
 
-    await tester.pumpWidget(
-      MultiProvider(
-        providers: [
-          ChangeNotifierProvider(
-            create: (_) => AppState(MockSpotRepository())..load(),
-          ),
-          ChangeNotifierProvider(create: (_) => SettingsState()..load()),
-        ],
-        child: MaterialApp(theme: AppTheme.dark, home: const RootShell()),
-      ),
-    );
+    await tester.pumpWidget(testApp(home: const RootShell()));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 700));
 
@@ -87,23 +74,23 @@ void main() {
 
     // Profile and its settings screen.
     await tester.tap(find.text('Profile').last);
-    await tester.pump();
-    await tester.pump(const Duration(milliseconds: 600));
-    expect(find.text('Plan a trip'), findsOneWidget);
+    await tester.pumpAndSettle();
 
-    await tester.tap(find.bySemanticsLabel('Settings'));
-    await tester.pump();
-    await tester.pump(const Duration(milliseconds: 400));
+    await tester.tap(find.byIcon(Icons.settings_rounded));
+    await tester.pumpAndSettle();
     expect(find.text('Settings'), findsWidgets);
     expect(tester.takeException(), isNull);
     tester.state<NavigatorState>(find.byType(Navigator)).pop();
-    await tester.pump();
-    await tester.pump(const Duration(milliseconds: 400));
+    await tester.pumpAndSettle();
 
-    // Plan trip screen.
-    await tester.tap(find.text('Plan a trip'));
-    await tester.pump();
-    await tester.pump(const Duration(milliseconds: 600));
+    // Plan trip lives below the profile fold.
+    await tester.scrollUntilVisible(
+      find.text('Plan a trip'),
+      300,
+      scrollable: find.byType(Scrollable).first,
+    );
+    await tester.tap(find.text('Plan a trip').first);
+    await tester.pumpAndSettle();
     expect(find.text('Plan Your Trip'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });

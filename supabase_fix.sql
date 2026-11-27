@@ -45,6 +45,30 @@ from _spot_dupes d where v.spot_id = d.dupe_id;
 update photos p set spot_id = d.keep_id
 from _spot_dupes d where p.spot_id = d.dupe_id;
 
+-- Likes and comments cascade on spot delete, so leaving them behind silently
+-- destroyed real engagement on every duplicate. Move them across; likes are
+-- unique per (user, spot), so drop collisions first. Guarded because this
+-- script may run on a project that has not applied supabase_engagement.sql.
+do $$
+begin
+  if to_regclass('public.likes') is not null then
+    delete from likes l
+    using _spot_dupes d
+    where l.spot_id = d.dupe_id
+      and exists (
+        select 1 from likes l2
+        where l2.user_id = l.user_id and l2.spot_id = d.keep_id
+      );
+    update likes l set spot_id = d.keep_id
+    from _spot_dupes d where l.spot_id = d.dupe_id;
+  end if;
+
+  if to_regclass('public.comments') is not null then
+    update comments c set spot_id = d.keep_id
+    from _spot_dupes d where c.spot_id = d.dupe_id;
+  end if;
+end $$;
+
 delete from spots s using _spot_dupes d where s.id = d.dupe_id;
 
 drop table if exists _spot_dupes;
@@ -68,7 +92,10 @@ create policy "Public photo reads"
 
 create policy "Authenticated photo uploads"
   on storage.objects for insert to authenticated
-  with check ( bucket_id = 'photos' );
+  with check (
+    bucket_id = 'photos'
+    and lower(storage.extension(name)) in ('jpg','jpeg','png','webp','heic','heif')
+  );
 
 create policy "Photo owners can update"
   on storage.objects for update to authenticated
@@ -88,3 +115,13 @@ drop policy if exists "Authenticated users can insert spots" on spots;
 create policy "Authenticated users can insert spots"
   on spots for insert to authenticated
   with check ( auth.uid() = submitted_by );
+
+-- Same server-owned columns as supabase_schema.sql: re-running any script must
+-- leave the counters and rating unwritable.
+revoke insert, update on spots from anon, authenticated;
+grant insert (
+  title, description, city, latitude, longitude, tags, best_time, submitted_by
+) on spots to anon, authenticated;
+grant update (
+  title, description, city, latitude, longitude, tags, best_time
+) on spots to anon, authenticated;

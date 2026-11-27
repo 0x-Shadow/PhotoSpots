@@ -28,10 +28,14 @@ void main() {
       expect(saved.score, greaterThan(viewed.score));
     });
 
-    test('view contribution is capped', () {
+    test('view contribution is capped at 40 points', () {
       final low = buildSpot(id: 'a', saveCount: 10, viewCount: 100);
       final high = buildSpot(id: 'b', saveCount: 10, viewCount: 100000);
-      expect(high.score - low.score, lessThanOrEqualTo(30));
+      // 0.05 points per view, clamped at 40 (lib/models/spot.dart).
+      expect(high.score - low.score, lessThanOrEqualTo(40));
+      // Even at the cap, a viral spot never beats a well-saved one.
+      final saved = buildSpot(id: 'c', saveCount: 40);
+      expect(saved.score, greaterThan(high.score));
     });
 
     test('fresh spots outrank older ones with the same saves', () {

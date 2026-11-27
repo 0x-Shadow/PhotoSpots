@@ -234,11 +234,16 @@ class SupabaseSpotRepository implements SpotRepository {
 
   @override
   Future<void> recordView(Spot spot) async {
-    final userId = _client.auth.currentUser?.id;
-    await _client.from('spot_views').insert({
-      'spot_id': spot.id,
-      'viewer': userId,
-    });
+    final userId = await _ensureUserId();
+    if (userId == null) return;
+    // One row per viewer per spot: the table has a unique key and the insert
+    // policy requires viewer = auth.uid(), so a re-open can neither duplicate
+    // nor inflate the view count that feeds ranking.
+    await _client.from('spot_views').upsert(
+      {'spot_id': spot.id, 'viewer': userId},
+      onConflict: 'spot_id,viewer',
+      ignoreDuplicates: true,
+    );
   }
 
   @override
