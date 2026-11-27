@@ -1,10 +1,12 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart' as sb;
 
 import '../app_info.dart';
+import '../services/photo_compression.dart';
 import '../utils/validators.dart';
 
 /// Outcome of a sign-in or sign-up attempt.
@@ -24,7 +26,7 @@ class AuthResult {
 ///  * The session token is owned by the Supabase SDK, which refreshes it and
 ///    persists it; the app only reads the resulting user id.
 ///  * Authorization is enforced by Postgres row-level security, not by this
-///    class — see `supabase_engagement.sql`.
+///    class — see `supabase_setup.sql`.
 ///
 /// When the build has no Supabase keys there is no password system at all:
 /// the profile is a local demo identity, clearly labelled as such. Inventing
@@ -36,6 +38,7 @@ class AuthState extends ChangeNotifier {
   static const displayNameKey = 'profile_display_name';
   static const bioKey = 'profile_bio';
   static const cityKey = 'profile_city';
+  static const avatarBase64Key = 'profile_avatar_b64';
 
   /// True when this build can create real accounts.
   static bool get supportsAccounts => AppInfo.backendConfigured;
@@ -45,6 +48,8 @@ class AuthState extends ChangeNotifier {
   String _displayName = '';
   String _bio = '';
   String _city = '';
+  String? _avatarUrl;
+  Uint8List? _localAvatarBytes;
   bool _loading = true;
   bool _busy = false;
   bool _disposed = false;
@@ -63,7 +68,17 @@ class AuthState extends ChangeNotifier {
   /// A build without Supabase keys: the profile lives only on this device.
   bool get isLocalOnlyMode => !supportsAccounts;
 
+  /// True when the user can publish spots, post comments, and sync profile
+  /// edits (either signed in with a real account, or running in local demo mode).
+  bool get canContribute => isSignedIn || isLocalOnlyMode;
+
+  /// Identifier matching `Spot.submittedById` for spots created by this user.
+  String? get activeUserId =>
+      isSignedIn ? _user?.id : (isLocalOnlyMode ? 'you' : null);
+
   String get email => _user?.email ?? '';
+  String? get avatarUrl => _avatarUrl;
+  Uint8List? get localAvatarBytes => _localAvatarBytes;
 
   String get displayName {
     final name = _displayName.trim();
@@ -113,9 +128,15 @@ class AuthState extends ChangeNotifier {
     if (client != null) {
       _user = client.auth.currentUser;
       _adoptMetadata();
+      if (isSignedIn) {
+        await _fetchRemoteProfile();
+      }
       _subscription = client.auth.onAuthStateChange.listen((event) {
         _user = event.session?.user ?? client.auth.currentUser;
         _adoptMetadata();
+        if (isSignedIn) {
+          _fetchRemoteProfile();
+        }
         _loading = false;
         _notify();
       });
@@ -130,8 +151,40 @@ class AuthState extends ChangeNotifier {
       _displayName = prefs.getString(displayNameKey) ?? '';
       _bio = prefs.getString(bioKey) ?? '';
       _city = prefs.getString(cityKey) ?? '';
+      final b64 = prefs.getString(avatarBase64Key);
+      if (b64 != null && b64.isNotEmpty) {
+        _localAvatarBytes = base64Decode(b64);
+      }
     } catch (_) {
       // Defaults are fine; the profile is cosmetic without storage.
+    }
+  }
+
+  Future<void> _fetchRemoteProfile() async {
+    final client = _client;
+    final userId = _user?.id;
+    if (client == null || userId == null || !isSignedIn) return;
+    try {
+      final row = await client
+          .from('profiles')
+          .select('display_name, bio, city, avatar_url')
+          .eq('id', userId)
+          .maybeSingle();
+      if (row == null) return;
+      final remoteName = (row['display_name'] as String?)?.trim() ?? '';
+      final remoteBio = (row['bio'] as String?)?.trim() ?? '';
+      final remoteCity = (row['city'] as String?)?.trim() ?? '';
+      final remoteAvatar = (row['avatar_url'] as String?)?.trim();
+      if (remoteName.isNotEmpty) _displayName = remoteName;
+      if (remoteBio.isNotEmpty) _bio = remoteBio;
+      if (remoteCity.isNotEmpty) _city = remoteCity;
+      if (remoteAvatar != null && remoteAvatar.isNotEmpty) {
+        _avatarUrl = remoteAvatar;
+      }
+      await _writePrefs();
+      _notify();
+    } catch (_) {
+      // Offline or unmigrated schema; keep local state.
     }
   }
 
@@ -168,6 +221,7 @@ class AuthState extends ChangeNotifier {
       );
       _user = response.user;
       _adoptMetadata();
+      await _fetchRemoteProfile();
       _setBusy(false);
       return const AuthResult.ok('Welcome back.');
     } on sb.AuthException catch (error) {
@@ -262,24 +316,61 @@ class AuthState extends ChangeNotifier {
     required String name,
     String? bio,
     String? city,
+    Uint8List? avatarBytes,
+    bool removeAvatar = false,
   }) async {
     final nameError = Validators.displayName(name);
     if (nameError != null) return AuthResult.failed(nameError);
 
+    final trimmedBio = (bio ?? _bio).trim();
+    if (trimmedBio.length > 140) {
+      return const AuthResult.failed('Keep your bio under 140 characters.');
+    }
+    final trimmedCity = (city ?? _city).trim();
+    if (trimmedCity.length > 80) {
+      return const AuthResult.failed('Keep your home city under 80 characters.');
+    }
+
     _displayName = name.trim();
-    if (bio != null) _bio = bio.trim();
-    if (city != null) _city = city.trim();
+    _bio = trimmedBio;
+    _city = trimmedCity;
+    if (removeAvatar) {
+      _localAvatarBytes = null;
+      _avatarUrl = null;
+    } else if (avatarBytes != null && avatarBytes.isNotEmpty) {
+      _localAvatarBytes = await compressForUpload(avatarBytes);
+    }
     await _writePrefs();
     _notify();
 
     final client = _client;
     if (client != null && isSignedIn) {
       try {
-        await client.from('profiles').update({
+        if (avatarBytes != null && avatarBytes.isNotEmpty) {
+          final uploadBytes = _localAvatarBytes ?? avatarBytes;
+          final path =
+              'avatars/${_user!.id}/${DateTime.now().millisecondsSinceEpoch}.jpg';
+          await client.storage.from('photos').uploadBinary(
+                path,
+                uploadBytes,
+                fileOptions: const sb.FileOptions(contentType: 'image/jpeg'),
+              );
+          _avatarUrl = client.storage.from('photos').getPublicUrl(path);
+        }
+        await client.from('profiles').upsert({
+          'id': _user!.id,
           'display_name': _displayName,
           'bio': _bio,
           'city': _city,
-        }).eq('id', _user!.id);
+          'avatar_url': _avatarUrl,
+        }, onConflict: 'id');
+        try {
+          await client.auth.updateUser(
+            sb.UserAttributes(data: {'display_name': _displayName}),
+          );
+        } catch (_) {
+          // Best-effort metadata mirror; profiles row is authoritative.
+        }
       } catch (_) {
         return const AuthResult.failed(
           'Saved on this device. Syncing your profile failed.',
@@ -289,12 +380,103 @@ class AuthState extends ChangeNotifier {
     return const AuthResult.ok('Profile updated.');
   }
 
+  /// Sends a password reset email when accounts are enabled.
+  Future<AuthResult> sendPasswordReset(String email) async {
+    final emailError = Validators.email(email);
+    if (emailError != null) return AuthResult.failed(emailError);
+    final client = _client;
+    if (client == null) {
+      return const AuthResult.failed(
+        'Password reset needs the hosted backend.',
+      );
+    }
+    _setBusy(true);
+    try {
+      await client.auth.resetPasswordForEmail(email.trim());
+      _setBusy(false);
+      return const AuthResult.ok(
+        'If an account exists for that email, a reset link is on its way.',
+      );
+    } catch (_) {
+      _setBusy(false);
+      return const AuthResult.failed(
+        'Could not send reset link right now. Please try again.',
+      );
+    }
+  }
+
+  /// Updates the signed-in user's password.
+  Future<AuthResult> updatePassword(String newPassword) async {
+    final err = Validators.password(newPassword);
+    if (err != null) return AuthResult.failed(err);
+    final client = _client;
+    if (client == null || !isSignedIn) {
+      return const AuthResult.failed('Sign in first to change your password.');
+    }
+    _setBusy(true);
+    try {
+      await client.auth.updateUser(sb.UserAttributes(password: newPassword));
+      _setBusy(false);
+      return const AuthResult.ok('Password updated.');
+    } catch (_) {
+      _setBusy(false);
+      return const AuthResult.failed(
+        'Could not update your password. You may need to sign in again first.',
+      );
+    }
+  }
+
+  /// Permanently deletes the signed-in account and local profile data
+  /// (required for Google Play Data Safety compliance).
+  Future<AuthResult> deleteAccount() async {
+    final client = _client;
+    if (client != null && isSignedIn) {
+      _setBusy(true);
+      try {
+        await client.rpc('delete_own_account');
+      } catch (_) {
+        _setBusy(false);
+        return const AuthResult.failed(
+          'Could not delete your account right now. Please try again or contact support.',
+        );
+      }
+      try {
+        await client.auth.signOut();
+      } catch (_) {}
+      _setBusy(false);
+    }
+
+    _user = null;
+    _displayName = '';
+    _bio = '';
+    _city = '';
+    _avatarUrl = null;
+    _localAvatarBytes = null;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.remove(displayNameKey);
+      await prefs.remove(bioKey);
+      await prefs.remove(cityKey);
+      await prefs.remove(avatarBase64Key);
+    } catch (_) {}
+    _notify();
+    return const AuthResult.ok('Account deleted.');
+  }
+
   Future<void> _writePrefs() async {
     try {
       final prefs = await SharedPreferences.getInstance();
       await prefs.setString(displayNameKey, _displayName);
       await prefs.setString(bioKey, _bio);
       await prefs.setString(cityKey, _city);
+      if (_localAvatarBytes != null && _localAvatarBytes!.length <= 250 * 1024) {
+        await prefs.setString(
+          avatarBase64Key,
+          base64Encode(_localAvatarBytes!),
+        );
+      } else if (_localAvatarBytes == null) {
+        await prefs.remove(avatarBase64Key);
+      }
     } catch (_) {
       // Local persistence is best effort.
     }

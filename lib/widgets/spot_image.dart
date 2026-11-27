@@ -31,14 +31,21 @@ class SpotImage extends StatelessWidget {
         (width == null
             ? null
             : (width! * MediaQuery.devicePixelRatioOf(context)).round());
-    final placeholder = Container(
+    final placeholder = Image.asset(
+      'assets/images/spot_placeholder.jpg',
+      fit: fit,
       width: width,
       height: height,
-      color: AppColors.surfaceElevated,
-      child: Icon(
-        Icons.landscape_rounded,
-        color: AppColors.textFaint,
-        size: iconSize,
+      cacheWidth: decodeWidth,
+      errorBuilder: (_, _, _) => Container(
+        width: width,
+        height: height,
+        color: AppColors.surfaceElevated,
+        child: Icon(
+          Icons.landscape_rounded,
+          color: AppColors.textFaint,
+          size: iconSize,
+        ),
       ),
     );
 

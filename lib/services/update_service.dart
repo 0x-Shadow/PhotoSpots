@@ -86,6 +86,14 @@ class UpdateService {
     }
   }
 
+  static bool _isTrustedApkUri(Uri uri) {
+    if (uri.scheme != 'https') return false;
+    final host = uri.host.toLowerCase();
+    return host == 'github.com' ||
+        host.endsWith('.githubusercontent.com') ||
+        host == AppInfo.releasesApi.host.toLowerCase();
+  }
+
   static _ApkAsset? _apkAsset(Object? assets) {
     if (assets is! List) return null;
     for (final asset in assets) {
@@ -93,14 +101,17 @@ class UpdateService {
       final name = (asset['name'] as String? ?? '').toLowerCase();
       if (!name.endsWith('.apk')) continue;
       final url = asset['browser_download_url'] as String? ?? '';
-      if (url.isEmpty) continue;
+      final parsed = Uri.tryParse(url);
+      if (parsed == null || !_isTrustedApkUri(parsed)) continue;
       return _ApkAsset(
-        url: Uri.parse(url),
+        url: parsed,
         size: asset['size'] as int?,
       );
     }
     return null;
   }
+
+  static const int _maxApkBytes = 200 * 1024 * 1024;
 
   /// Downloads the release APK to [target], reporting progress as it goes.
   ///
@@ -115,6 +126,9 @@ class UpdateService {
   }) async {
     final url = release.apkUrl;
     if (url == null) throw const UpdateDownloadException('no-binary');
+    if (!_isTrustedApkUri(url)) {
+      throw const UpdateDownloadException('untrusted-source');
+    }
 
     final client = http.Client();
     IOSink? sink;
@@ -138,8 +152,11 @@ class UpdateService {
         if (isCancelled != null && await isCancelled()) {
           throw const UpdateDownloadException('cancelled');
         }
-        sink.add(chunk);
         received += chunk.length;
+        if (received > _maxApkBytes) {
+          throw const UpdateDownloadException('too-large');
+        }
+        sink.add(chunk);
         if (onProgress != null &&
             (received - lastReport > 256 * 1024 ||
                 (total != null && received >= total))) {

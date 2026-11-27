@@ -15,8 +15,8 @@ class SplashScreen extends StatelessWidget {
       body: Stack(
         fit: StackFit.expand,
         children: [
-          Image.network(
-            'https://picsum.photos/seed/photospot-splash/1200/2000',
+          Image.asset(
+            'assets/images/splash_hero.jpg',
             fit: BoxFit.cover,
             errorBuilder: (_, _, _) => const DecoratedBox(
               decoration: BoxDecoration(

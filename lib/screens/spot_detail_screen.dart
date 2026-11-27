@@ -1,8 +1,11 @@
 import 'package:flutter/material.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:provider/provider.dart';
 
 import '../models/spot.dart';
+import '../services/photo_compression.dart';
 import '../state/app_state.dart';
+import '../state/auth_state.dart';
 import '../state/settings_state.dart';
 import '../theme/app_animations.dart';
 import '../theme/app_theme.dart';
@@ -10,10 +13,14 @@ import '../utils/actions.dart';
 import '../utils/categories.dart';
 import '../utils/format.dart';
 import '../utils/share.dart';
+import '../utils/solar.dart';
 import '../widgets/comments_section.dart';
+import '../widgets/edit_spot_sheet.dart';
+import '../widgets/moderation_dialogs.dart';
 import '../widgets/spot_image.dart';
 import '../widgets/spot_mini_map.dart';
 import '../widgets/state_views.dart';
+import 'author_profile_screen.dart';
 import 'spot_list_screen.dart';
 
 /// Spot detail: hero, honest facts, a location preview and one reachable
@@ -153,22 +160,97 @@ class _SpotDetailScreenState extends State<SpotDetailScreen> {
                               ),
                             ],
                           ),
+                          const SizedBox(height: 18),
+                          _SolarLightCard(spot: spot),
                           const SizedBox(height: 20),
                           Text(
                             spot.description,
                             style: Theme.of(context).textTheme.bodyLarge,
                           ),
-                          if (spot.city.isNotEmpty) ...[
-                            const SizedBox(height: 12),
+                          if (spot.focalLength != null ||
+                              spot.tripodFriendly == true ||
+                              (spot.accessNote?.isNotEmpty ?? false)) ...[
+                            const SizedBox(height: 14),
+                            Wrap(
+                              spacing: 8,
+                              runSpacing: 8,
+                              children: [
+                                if (spot.focalLength != null)
+                                  _GearChip(
+                                    icon: Icons.camera_alt_outlined,
+                                    label: spot.focalLength!,
+                                  ),
+                                if (spot.tripodFriendly == true)
+                                  const _GearChip(
+                                    icon: Icons.straighten_rounded,
+                                    label: 'Tripod friendly',
+                                  ),
+                                if (spot.accessNote != null &&
+                                    spot.accessNote!.isNotEmpty)
+                                  _GearChip(
+                                    icon: Icons.directions_walk_rounded,
+                                    label: spot.accessNote!,
+                                  ),
+                              ],
+                            ),
+                          ],
+                          if (spot.city.isNotEmpty ||
+                              (spot.submittedBy?.isNotEmpty ?? false)) ...[
+                            const SizedBox(height: 14),
                             Row(
                               children: [
-                                const Icon(Icons.place_rounded,
-                                    color: AppColors.textFaint, size: 15),
-                                const SizedBox(width: 4),
-                                Text(
-                                  spot.city,
-                                  style: Theme.of(context).textTheme.bodySmall,
-                                ),
+                                if (spot.city.isNotEmpty) ...[
+                                  const Icon(Icons.place_rounded,
+                                      color: AppColors.textFaint, size: 15),
+                                  const SizedBox(width: 4),
+                                  Flexible(
+                                    child: Text(
+                                      spot.city,
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: Theme.of(context)
+                                          .textTheme
+                                          .bodySmall,
+                                    ),
+                                  ),
+                                ],
+                                if (spot.city.isNotEmpty &&
+                                    (spot.submittedBy?.isNotEmpty ?? false))
+                                  const Text(
+                                    ' · ',
+                                    style: TextStyle(color: AppColors.textFaint),
+                                  ),
+                                if (spot.submittedBy != null &&
+                                    spot.submittedBy!.isNotEmpty)
+                                  Flexible(
+                                    child: InkWell(
+                                      onTap: () => Navigator.of(context).push(
+                                        AppMotion.slideUp(
+                                          AuthorProfileScreen(
+                                            authorName: spot.submittedBy!,
+                                            authorId: spot.submittedById,
+                                          ),
+                                        ),
+                                      ),
+                                      borderRadius: BorderRadius.circular(6),
+                                      child: Padding(
+                                        padding: const EdgeInsets.symmetric(
+                                          vertical: 2,
+                                          horizontal: 2,
+                                        ),
+                                        child: Text(
+                                          'Shared by ${spot.submittedBy}',
+                                          maxLines: 1,
+                                          overflow: TextOverflow.ellipsis,
+                                          style: Theme.of(context)
+                                              .textTheme
+                                              .bodySmall
+                                              ?.copyWith(
+                                                  color: AppColors.accent),
+                                        ),
+                                      ),
+                                    ),
+                                  ),
                               ],
                             ),
                           ],
@@ -225,6 +307,8 @@ class _SpotDetailScreenState extends State<SpotDetailScreen> {
                           ],
                           const SizedBox(height: 26),
                           const Divider(height: 1, color: AppColors.hairline),
+                          const SizedBox(height: 22),
+                          _ContributePhotoRow(spot: spot),
                           const SizedBox(height: 22),
                           CommentsSection(spotId: spot.id),
                           if (photos.length > 1) ...[
@@ -330,13 +414,17 @@ class _StickyBar extends StatelessWidget {
                             color: AppColors.textPrimary, size: 22),
                       ),
                     ),
-                    const Spacer(),
-                    Text(
-                      spot.title,
-                      style: Theme.of(context).textTheme.titleSmall,
-                      overflow: TextOverflow.ellipsis,
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        spot.title,
+                        textAlign: TextAlign.center,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: Theme.of(context).textTheme.titleSmall,
+                      ),
                     ),
-                    const Spacer(),
+                    const SizedBox(width: 8),
                     PressButton(
                       semanticLabel: 'Share this spot',
                       onTap: () => shareLocationLink(
@@ -510,6 +598,8 @@ class _HeroGallery extends StatelessWidget {
                             color: AppColors.textPrimary, size: 20),
                       ),
                     ),
+                    const SizedBox(width: 8),
+                    _SpotMoreButton(spot: spot),
                   ],
                 ),
               ),
@@ -628,6 +718,330 @@ class _FactTile extends StatelessWidget {
           ],
         ),
       ),
+    );
+  }
+}
+
+class _SpotMoreButton extends StatelessWidget {
+  const _SpotMoreButton({required this.spot});
+
+  final Spot spot;
+
+  @override
+  Widget build(BuildContext context) {
+    final app = context.read<AppState>();
+    final auth = context.read<AuthState>();
+    final isOwner = auth.activeUserId != null &&
+        (spot.submittedById == auth.activeUserId ||
+            (auth.isLocalOnlyMode && spot.submittedById == 'you'));
+
+    return Semantics(
+      button: true,
+      label: 'More options',
+      child: PopupMenuButton<String>(
+        tooltip: 'More options',
+        color: AppColors.surfaceElevated,
+        onSelected: (value) async {
+          if (value == 'edit') {
+            final saved = await showEditSpotSheet(context, spot);
+            if (saved && context.mounted) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text('Spot updated.')),
+              );
+            }
+          } else if (value == 'report') {
+            await showReportSheet(
+              context,
+              targetType: 'spot',
+              targetId: spot.id,
+              authorId: spot.submittedById,
+              authorName: spot.submittedBy,
+            );
+          } else if (value == 'block' && spot.submittedById != null) {
+            await app.blockUser(spot.submittedById!);
+            if (!context.mounted) return;
+            Navigator.of(context).maybePop();
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(content: Text('User blocked and spots hidden.')),
+            );
+          } else if (value == 'delete') {
+            final confirm = await showDialog<bool>(
+              context: context,
+              builder: (dialogContext) => AlertDialog(
+                title: const Text('Delete spot?'),
+                content: const Text(
+                  'This removes your spot and its photos from the map.',
+                ),
+                actions: [
+                  TextButton(
+                    onPressed: () => Navigator.of(dialogContext).pop(false),
+                    child: const Text('Cancel'),
+                  ),
+                  TextButton(
+                    onPressed: () => Navigator.of(dialogContext).pop(true),
+                    style:
+                        TextButton.styleFrom(foregroundColor: AppColors.danger),
+                    child: const Text('Delete'),
+                  ),
+                ],
+              ),
+            );
+            if (confirm == true && context.mounted) {
+              try {
+                await app.deleteSpot(spot);
+                if (!context.mounted) return;
+                Navigator.of(context).maybePop();
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('Spot deleted.')),
+                );
+              } catch (_) {
+                if (!context.mounted) return;
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('Could not delete spot.')),
+                );
+              }
+            }
+          }
+        },
+        itemBuilder: (_) => [
+          if (isOwner) ...[
+            const PopupMenuItem(
+              value: 'edit',
+              child: Text('Edit spot'),
+            ),
+            const PopupMenuItem(
+              value: 'delete',
+              child: Text(
+                'Delete spot',
+                style: TextStyle(color: AppColors.danger),
+              ),
+            ),
+          ],
+          if (!isOwner) ...[
+            const PopupMenuItem(
+              value: 'report',
+              child: Text('Report spot'),
+            ),
+            if (spot.submittedById != null &&
+                spot.submittedById!.isNotEmpty &&
+                spot.submittedById != 'photospot-seed')
+              const PopupMenuItem(
+                value: 'block',
+                child: Text('Block author'),
+              ),
+          ],
+        ],
+        child: Container(
+          width: 44,
+          height: 44,
+          decoration: BoxDecoration(
+            color: Colors.black.withValues(alpha: 0.35),
+            shape: BoxShape.circle,
+            border: Border.all(color: AppColors.hairline),
+          ),
+          child: const Icon(
+            Icons.more_horiz_rounded,
+            color: AppColors.textPrimary,
+            size: 20,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _SolarLightCard extends StatelessWidget {
+  const _SolarLightCard({required this.spot});
+
+  final Spot spot;
+
+  @override
+  Widget build(BuildContext context) {
+    final light = SolarCalculator.forLocation(
+      latitude: spot.location.latitude,
+      longitude: spot.location.longitude,
+      date: DateTime.now(),
+    );
+
+    if (light.isPolarDay || light.isPolarNight) {
+      return const SizedBox.shrink();
+    }
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: AppColors.hairline),
+      ),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Expanded(
+            child: _SolarCell(
+              label: 'Sunrise',
+              value: SolarCalculator.formatTime(light.sunrise),
+            ),
+          ),
+          Expanded(
+            child: _SolarCell(
+              label: 'Golden',
+              value: SolarCalculator.formatTime(light.eveningGoldenStart),
+              accent: AppColors.star,
+            ),
+          ),
+          Expanded(
+            child: _SolarCell(
+              label: 'Sunset',
+              value: SolarCalculator.formatTime(light.sunset),
+            ),
+          ),
+          Expanded(
+            child: _SolarCell(
+              label: 'Blue hr',
+              value: SolarCalculator.formatTime(light.eveningBlueEnd),
+              accent: AppColors.accent,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _SolarCell extends StatelessWidget {
+  const _SolarCell({
+    required this.label,
+    required this.value,
+    this.accent,
+  });
+
+  final String label;
+  final String value;
+  final Color? accent;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      children: [
+        Text(
+          label,
+          style: const TextStyle(
+            color: AppColors.textFaint,
+            fontSize: 10.5,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+        const SizedBox(height: 3),
+        Text(
+          value,
+          style: TextStyle(
+            color: accent ?? AppColors.textPrimary,
+            fontSize: 13,
+            fontWeight: FontWeight.w800,
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _GearChip extends StatelessWidget {
+  const _GearChip({required this.icon, required this.label});
+
+  final IconData icon;
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: BoxDecoration(
+        color: AppColors.surfaceElevated,
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: AppColors.hairline),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 13, color: AppColors.textSecondary),
+          const SizedBox(width: 5),
+          Text(
+            label,
+            style: const TextStyle(
+              color: AppColors.textSecondary,
+              fontSize: 11.5,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ContributePhotoRow extends StatefulWidget {
+  const _ContributePhotoRow({required this.spot});
+
+  final Spot spot;
+
+  @override
+  State<_ContributePhotoRow> createState() => _ContributePhotoRowState();
+}
+
+class _ContributePhotoRowState extends State<_ContributePhotoRow> {
+  bool _uploading = false;
+
+  Future<void> _addPhoto() async {
+    if (_uploading) return;
+    if (!await requireSignedInAccount(
+      context,
+      actionLabel: 'add photos to spots',
+    )) {
+      return;
+    }
+    if (!mounted) return;
+    final messenger = ScaffoldMessenger.of(context);
+    final app = context.read<AppState>();
+    try {
+      final picked = await ImagePicker().pickImage(source: ImageSource.gallery);
+      if (picked == null || !mounted) return;
+      setState(() => _uploading = true);
+      final raw = await picked.readAsBytes();
+      final sanitized = await compressForUpload(raw);
+      await app.addSpotPhoto(spotId: widget.spot.id, photoBytes: sanitized);
+      if (!mounted) return;
+      messenger.showSnackBar(
+        const SnackBar(content: Text('Photo added to spot.')),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      messenger.showSnackBar(
+        SnackBar(content: Text('Could not add photo: $e')),
+      );
+    } finally {
+      if (mounted) setState(() => _uploading = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return OutlinedButton.icon(
+      onPressed: _uploading ? null : _addPhoto,
+      style: OutlinedButton.styleFrom(
+        foregroundColor: AppColors.textPrimary,
+        side: const BorderSide(color: AppColors.hairline),
+        minimumSize: const Size.fromHeight(46),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+      ),
+      icon: _uploading
+          ? const SizedBox(
+              width: 16,
+              height: 16,
+              child: CircularProgressIndicator(strokeWidth: 2),
+            )
+          : const Icon(Icons.add_a_photo_outlined, size: 18),
+      label: Text(_uploading ? 'Uploading photo…' : 'Add your angle to this spot'),
     );
   }
 }

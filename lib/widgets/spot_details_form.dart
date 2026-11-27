@@ -10,6 +10,9 @@ class SpotDraftController {
   String city = '';
   String tip = '';
   String? bestTime;
+  String? focalLength;
+  bool? tripodFriendly;
+  String accessNote = '';
   final Set<String> tags = {};
 
   bool submitted = false;
@@ -30,6 +33,8 @@ class SpotDetailsForm extends StatefulWidget {
     this.onPublish,
     this.onChangeLocation,
     this.cityEditable = false,
+    this.submitting = false,
+    this.publishLabel = 'Publish',
   });
 
   final SpotDraftController controller;
@@ -45,6 +50,10 @@ class SpotDetailsForm extends StatefulWidget {
 
   /// True when the geocoder failed and the user must supply a city.
   final bool cityEditable;
+  final bool submitting;
+  final String publishLabel;
+
+  static const focalLengthOptions = ['16mm', '24mm', '35mm', '50mm', '85mm+'];
 
   static const bestTimeOptions = [
     'Golden hour',
@@ -75,6 +84,9 @@ class _SpotDetailsFormState extends State<SpotDetailsForm> {
   late final TextEditingController _name;
   late final TextEditingController _tip;
   late final TextEditingController _city;
+  late final TextEditingController _access;
+  bool _nameEdited = false;
+  bool _cityEdited = false;
 
   @override
   void initState() {
@@ -86,6 +98,24 @@ class _SpotDetailsFormState extends State<SpotDetailsForm> {
     _name = TextEditingController(text: widget.initialName);
     _tip = TextEditingController(text: draft.tip);
     _city = TextEditingController(text: widget.initialCity);
+    _access = TextEditingController(text: draft.accessNote);
+  }
+
+  @override
+  void didUpdateWidget(covariant SpotDetailsForm oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (!_nameEdited &&
+        widget.initialName != oldWidget.initialName &&
+        widget.initialName.isNotEmpty) {
+      _name.text = widget.initialName;
+      widget.controller.name = widget.initialName;
+    }
+    if (!_cityEdited &&
+        widget.initialCity != oldWidget.initialCity &&
+        widget.initialCity.isNotEmpty) {
+      _city.text = widget.initialCity;
+      widget.controller.city = widget.initialCity;
+    }
   }
 
   @override
@@ -93,6 +123,7 @@ class _SpotDetailsFormState extends State<SpotDetailsForm> {
     _name.dispose();
     _tip.dispose();
     _city.dispose();
+    _access.dispose();
     super.dispose();
   }
 
@@ -108,8 +139,9 @@ class _SpotDetailsFormState extends State<SpotDetailsForm> {
     final draft = widget.controller;
     final showError = draft.submitted && !draft.canPublish;
 
-    return ListView(
-      padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
+    final embedded = widget.location == null && widget.onChangeLocation == null;
+    final content = Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         if (widget.location != null) ...[
           _LocationSummary(
@@ -125,7 +157,10 @@ class _SpotDetailsFormState extends State<SpotDetailsForm> {
         TextField(
           controller: _name,
           textCapitalization: TextCapitalization.words,
-          onChanged: (value) => setState(() => draft.name = value),
+          onChanged: (value) => setState(() {
+            _nameEdited = true;
+            draft.name = value;
+          }),
           style: theme.bodyLarge?.copyWith(color: AppColors.textPrimary),
           decoration: const InputDecoration(hintText: 'Name this place'),
         ),
@@ -141,7 +176,7 @@ class _SpotDetailsFormState extends State<SpotDetailsForm> {
         const SizedBox(height: 8),
         TextField(
           controller: _tip,
-          maxLines: 4,
+          maxLines: 3,
           textCapitalization: TextCapitalization.sentences,
           onChanged: (value) => setState(() => draft.tip = value),
           style: theme.bodyLarge?.copyWith(color: AppColors.textPrimary),
@@ -155,7 +190,10 @@ class _SpotDetailsFormState extends State<SpotDetailsForm> {
         TextField(
           controller: _city,
           textCapitalization: TextCapitalization.words,
-          onChanged: (value) => setState(() => draft.city = value),
+          onChanged: (value) => setState(() {
+            _cityEdited = true;
+            draft.city = value;
+          }),
           style: theme.bodyLarge?.copyWith(color: AppColors.textPrimary),
           decoration: const InputDecoration(
             hintText: 'Nearest city',
@@ -209,10 +247,48 @@ class _SpotDetailsFormState extends State<SpotDetailsForm> {
               ),
           ],
         ),
+        const SizedBox(height: 22),
+        _FieldLabel('Gear & access (optional)'),
+        const SizedBox(height: 10),
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: [
+            for (final lens in SpotDetailsForm.focalLengthOptions)
+              _TagChip(
+                label: lens,
+                selected: draft.focalLength == lens,
+                onTap: () => setState(() {
+                  draft.focalLength = draft.focalLength == lens ? null : lens;
+                }),
+              ),
+            _TagChip(
+              label: 'Tripod friendly',
+              selected: draft.tripodFriendly == true,
+              onTap: () => setState(() {
+                draft.tripodFriendly =
+                    draft.tripodFriendly == true ? null : true;
+              }),
+            ),
+          ],
+        ),
+        const SizedBox(height: 10),
+        TextField(
+          controller: _access,
+          maxLength: 80,
+          textCapitalization: TextCapitalization.sentences,
+          onChanged: (value) => setState(() => draft.accessNote = value),
+          style: theme.bodyLarge?.copyWith(color: AppColors.textPrimary),
+          decoration: const InputDecoration(
+            hintText: 'Access note (e.g. Free entry, short 5 min hike)',
+            counterText: '',
+          ),
+        ),
         const SizedBox(height: 24),
         PressButton(
           key: const ValueKey('details_publish'),
-          semanticLabel: 'Publish spot',
+          semanticLabel: widget.publishLabel,
+          enabled: !widget.submitting,
           onTap: _publish,
           child: Container(
             height: 52,
@@ -221,16 +297,31 @@ class _SpotDetailsFormState extends State<SpotDetailsForm> {
               color: AppColors.action,
               borderRadius: BorderRadius.circular(14),
             ),
-            child: Text(
-              'Publish',
-              style: theme.labelLarge?.copyWith(
-                color: AppColors.onAction,
-                fontWeight: FontWeight.w800,
-              ),
-            ),
+            child: widget.submitting
+                ? const SizedBox(
+                    width: 20,
+                    height: 20,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2.2,
+                      color: AppColors.onAction,
+                    ),
+                  )
+                : Text(
+                    widget.publishLabel,
+                    style: theme.labelLarge?.copyWith(
+                      color: AppColors.onAction,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
           ),
         ),
       ],
+    );
+
+    if (embedded) return content;
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
+      children: [content],
     );
   }
 }

@@ -10,6 +10,7 @@ import '../theme/app_theme.dart';
 import '../utils/categories.dart';
 import '../utils/format.dart';
 import '../utils/navigation.dart';
+import '../widgets/edit_profile_sheet.dart';
 import '../widgets/location_prompt.dart';
 import '../widgets/spot_image.dart';
 import 'auth_screen.dart';
@@ -69,9 +70,15 @@ class ProfileScreen extends StatelessWidget {
                 ],
               ),
               const SizedBox(height: 14),
-              _IdentityCard(auth: auth, onEdit: () => _editProfile(context)),
+              _IdentityCard(
+                auth: auth,
+                onEdit: () => showEditProfileSheet(context),
+              ),
               const SizedBox(height: 12),
-              _AccountActions(auth: auth),
+              _AccountActions(
+                auth: auth,
+                onEdit: () => showEditProfileSheet(context),
+              ),
               const SizedBox(height: 16),
               _StatsRow(
                 saved: saved.length,
@@ -104,22 +111,6 @@ class ProfileScreen extends StatelessWidget {
         ),
       ),
     );
-  }
-
-  Future<void> _editProfile(BuildContext context) async {
-    final auth = context.read<AuthState>();
-    final messenger = ScaffoldMessenger.of(context);
-    final result = await showModalBottomSheet<bool>(
-      context: context,
-      isScrollControlled: true,
-      showDragHandle: true,
-      builder: (_) => _EditProfileSheet(auth: auth),
-    );
-    if (result == true) {
-      messenger.showSnackBar(
-        const SnackBar(content: Text('Profile updated.')),
-      );
-    }
   }
 }
 
@@ -186,20 +177,45 @@ class _IdentityCard extends StatelessWidget {
                         colors: [AppColors.accent, Color(0xFF7C6CFF)],
                       ),
                     ),
-                    child: Container(
-                      alignment: Alignment.center,
-                      decoration: const BoxDecoration(
-                        shape: BoxShape.circle,
-                        color: Color(0xFF16161A),
-                      ),
-                      child: Text(
-                        auth.initials,
-                        style: const TextStyle(
-                          color: AppColors.textPrimary,
-                          fontSize: 24,
-                          fontWeight: FontWeight.w800,
-                          letterSpacing: -0.5,
+                    child: ClipOval(
+                      child: Container(
+                        alignment: Alignment.center,
+                        decoration: const BoxDecoration(
+                          shape: BoxShape.circle,
+                          color: Color(0xFF16161A),
                         ),
+                        child: auth.localAvatarBytes != null
+                            ? Image.memory(
+                                auth.localAvatarBytes!,
+                                width: 65,
+                                height: 65,
+                                fit: BoxFit.cover,
+                              )
+                            : (auth.avatarUrl?.isNotEmpty ?? false)
+                                ? Image.network(
+                                    auth.avatarUrl!,
+                                    width: 65,
+                                    height: 65,
+                                    fit: BoxFit.cover,
+                                    errorBuilder: (_, _, _) => Text(
+                                      auth.initials,
+                                      style: const TextStyle(
+                                        color: AppColors.textPrimary,
+                                        fontSize: 24,
+                                        fontWeight: FontWeight.w800,
+                                        letterSpacing: -0.5,
+                                      ),
+                                    ),
+                                  )
+                                : Text(
+                                    auth.initials,
+                                    style: const TextStyle(
+                                      color: AppColors.textPrimary,
+                                      fontSize: 24,
+                                      fontWeight: FontWeight.w800,
+                                      letterSpacing: -0.5,
+                                    ),
+                                  ),
                       ),
                     ),
                   ),
@@ -332,11 +348,12 @@ class _Chip extends StatelessWidget {
   }
 }
 
-/// Sign-in / sign-out entry points. One primary action, never a dead end.
+/// Sign-in / sign-out / edit profile entry points.
 class _AccountActions extends StatelessWidget {
-  const _AccountActions({required this.auth});
+  const _AccountActions({required this.auth, required this.onEdit});
 
   final AuthState auth;
+  final VoidCallback onEdit;
 
   @override
   Widget build(BuildContext context) {
@@ -344,11 +361,25 @@ class _AccountActions extends StatelessWidget {
       return Row(
         children: [
           Expanded(
-            child: _AccountButton(
-              icon: Icons.sync_rounded,
-              label: 'Saves sync across devices',
-              tone: AppColors.success,
-              onTap: null,
+            child: PressButton(
+              semanticLabel: 'Edit profile',
+              onTap: onEdit,
+              child: Container(
+                height: 48,
+                alignment: Alignment.center,
+                decoration: BoxDecoration(
+                  color: AppColors.action,
+                  borderRadius: BorderRadius.circular(999),
+                ),
+                child: const Text(
+                  'Edit profile',
+                  style: TextStyle(
+                    color: AppColors.onAction,
+                    fontSize: 13.5,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+              ),
             ),
           ),
           const SizedBox(width: 8),
@@ -371,45 +402,62 @@ class _AccountActions extends StatelessWidget {
       );
     }
 
-    return Row(
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Expanded(
-          child: PressButton(
-            semanticLabel: 'Create an account',
+        if (AuthState.supportsAccounts) ...[
+          _AccountButton(
+            icon: Icons.lock_outline_rounded,
+            label:
+                'Guest mode is read-only. Sign in to publish spots, comment, and edit your cloud profile.',
+            tone: AppColors.accent,
             onTap: () => Navigator.of(context).push(
-              AppMotion.slideUp(const AuthScreen(startInSignUp: true)),
+              AppMotion.slideUp(const AuthScreen()),
             ),
-            child: Container(
-              height: 50,
-              alignment: Alignment.center,
-              decoration: BoxDecoration(
-                color: AppColors.action,
-                borderRadius: BorderRadius.circular(999),
-              ),
-              child: const Text(
-                'Create account',
-                style: TextStyle(
-                  color: AppColors.onAction,
-                  fontSize: 14,
-                  fontWeight: FontWeight.w800,
+          ),
+          const SizedBox(height: 10),
+        ],
+        Row(
+          children: [
+            Expanded(
+              child: PressButton(
+                semanticLabel: 'Create an account',
+                onTap: () => Navigator.of(context).push(
+                  AppMotion.slideUp(const AuthScreen(startInSignUp: true)),
+                ),
+                child: Container(
+                  height: 50,
+                  alignment: Alignment.center,
+                  decoration: BoxDecoration(
+                    color: AppColors.action,
+                    borderRadius: BorderRadius.circular(999),
+                  ),
+                  child: const Text(
+                    'Create account',
+                    style: TextStyle(
+                      color: AppColors.onAction,
+                      fontSize: 14,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
                 ),
               ),
             ),
-          ),
-        ),
-        const SizedBox(width: 8),
-        Expanded(
-          child: OutlinedButton(
-            onPressed: () => Navigator.of(context).push(
-              AppMotion.slideUp(const AuthScreen()),
+            const SizedBox(width: 8),
+            Expanded(
+              child: OutlinedButton(
+                onPressed: () => Navigator.of(context).push(
+                  AppMotion.slideUp(const AuthScreen()),
+                ),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: AppColors.textPrimary,
+                  side: const BorderSide(color: AppColors.hairline),
+                  minimumSize: const Size.fromHeight(50),
+                ),
+                child: const Text('Sign in'),
+              ),
             ),
-            style: OutlinedButton.styleFrom(
-              foregroundColor: AppColors.textPrimary,
-              side: const BorderSide(color: AppColors.hairline),
-              minimumSize: const Size.fromHeight(50),
-            ),
-            child: const Text('Sign in'),
-          ),
+          ],
         ),
       ],
     );
@@ -431,31 +479,34 @@ class _AccountButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      constraints: const BoxConstraints(minHeight: 50),
-      padding: const EdgeInsets.symmetric(horizontal: 12),
-      decoration: BoxDecoration(
-        color: tone.withValues(alpha: 0.1),
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: tone.withValues(alpha: 0.28)),
-      ),
-      child: Row(
-        children: [
-          Icon(icon, color: tone, size: 16),
-          const SizedBox(width: 7),
-          Expanded(
-            child: Text(
-              label,
-              maxLines: 2,
-              style: const TextStyle(
-                color: AppColors.textSecondary,
-                fontSize: 11.5,
-                height: 1.3,
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        constraints: const BoxConstraints(minHeight: 50),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        decoration: BoxDecoration(
+          color: tone.withValues(alpha: 0.1),
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: tone.withValues(alpha: 0.28)),
+        ),
+        child: Row(
+          children: [
+            Icon(icon, color: tone, size: 16),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                label,
+                maxLines: 3,
+                style: const TextStyle(
+                  color: AppColors.textSecondary,
+                  fontSize: 11.5,
+                  height: 1.3,
+                ),
               ),
             ),
-          ),
-          if (onTap != null) const Icon(Icons.chevron_right_rounded, size: 16),
-        ],
+            if (onTap != null) const Icon(Icons.chevron_right_rounded, size: 16),
+          ],
+        ),
       ),
     );
   }
@@ -1007,128 +1058,6 @@ class _ShortcutRow extends StatelessWidget {
               ),
             ],
           ),
-        ),
-      ),
-    );
-  }
-}
-
-/// Edits the local profile and mirrors it to the signed-in row.
-class _EditProfileSheet extends StatefulWidget {
-  const _EditProfileSheet({required this.auth});
-
-  final AuthState auth;
-
-  @override
-  State<_EditProfileSheet> createState() => _EditProfileSheetState();
-}
-
-class _EditProfileSheetState extends State<_EditProfileSheet> {
-  late final _name = TextEditingController(text: widget.auth.displayName);
-  late final _bio = TextEditingController(text: widget.auth.bio);
-  late final _city = TextEditingController(text: widget.auth.city);
-  String? _error;
-
-  @override
-  void dispose() {
-    _name.dispose();
-    _bio.dispose();
-    _city.dispose();
-    super.dispose();
-  }
-
-  Future<void> _save() async {
-    final result = await widget.auth.updateProfile(
-      name: _name.text,
-      bio: _bio.text,
-      city: _city.text,
-    );
-    if (!mounted) return;
-    if (!result.success) {
-      setState(() => _error = result.message);
-      return;
-    }
-    Navigator.of(context).pop(true);
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: EdgeInsets.only(
-        bottom: MediaQuery.viewInsetsOf(context).bottom,
-      ),
-      child: SingleChildScrollView(
-        padding: const EdgeInsets.fromLTRB(20, 0, 20, 24),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text(
-              'Edit profile',
-              style: TextStyle(
-                color: AppColors.textPrimary,
-                fontSize: 20,
-                fontWeight: FontWeight.w800,
-                letterSpacing: -0.5,
-              ),
-            ),
-            const SizedBox(height: 14),
-            TextField(
-              key: const ValueKey('profile_name'),
-              controller: _name,
-              textCapitalization: TextCapitalization.words,
-              decoration: const InputDecoration(labelText: 'Display name'),
-            ),
-            const SizedBox(height: 10),
-            TextField(
-              key: const ValueKey('profile_bio'),
-              controller: _bio,
-              maxLines: 2,
-              maxLength: 140,
-              decoration: const InputDecoration(
-                labelText: 'Bio',
-                hintText: 'What do you like shooting?',
-                counterText: '',
-              ),
-            ),
-            const SizedBox(height: 10),
-            TextField(
-              key: const ValueKey('profile_city'),
-              controller: _city,
-              textCapitalization: TextCapitalization.words,
-              decoration: const InputDecoration(labelText: 'Home city'),
-            ),
-            if (_error != null) ...[
-              const SizedBox(height: 10),
-              Text(
-                _error!,
-                style: const TextStyle(
-                  color: AppColors.danger,
-                  fontSize: 12.5,
-                ),
-              ),
-            ],
-            const SizedBox(height: 16),
-            PressButton(
-              semanticLabel: 'Save profile',
-              onTap: _save,
-              child: Container(
-                height: 50,
-                alignment: Alignment.center,
-                decoration: BoxDecoration(
-                  color: AppColors.action,
-                  borderRadius: BorderRadius.circular(999),
-                ),
-                child: const Text(
-                  'Save',
-                  style: TextStyle(
-                    color: AppColors.onAction,
-                    fontSize: 14,
-                    fontWeight: FontWeight.w800,
-                  ),
-                ),
-              ),
-            ),
-          ],
         ),
       ),
     );

@@ -3,12 +3,14 @@ import 'package:provider/provider.dart';
 
 import '../app_info.dart';
 import '../models/comment.dart';
+import '../screens/auth_screen.dart';
 import '../state/app_state.dart';
 import '../state/auth_state.dart';
 import '../theme/app_animations.dart';
 import '../theme/app_theme.dart';
 import '../utils/format.dart';
 import '../utils/validators.dart';
+import 'moderation_dialogs.dart';
 
 /// A spot's comment thread plus a composer. Loads once, posts optimistically,
 /// and keeps the count in sync with the detail header.
@@ -137,19 +139,51 @@ class _CommentsSectionState extends State<CommentsSection> {
           )
         else
           for (final comment in comments) ...[
-            _CommentTile(comment: comment),
+            _CommentTile(
+              comment: comment,
+              isOwn: auth.activeUserId != null &&
+                  (comment.authorId == auth.activeUserId ||
+                      (auth.isLocalOnlyMode &&
+                          comment.authorId == 'local-you')),
+              onDelete: () => state.deleteComment(widget.spotId, comment),
+            ),
             const SizedBox(height: 10),
           ],
         const SizedBox(height: 6),
-        _Composer(
-          controller: _controller,
-          focusNode: _focus,
-          posting: _posting,
-          hint: auth.isSignedIn
-              ? 'Add what you saw…'
-              : 'Comment as ${auth.displayName}',
-          onSubmit: _submit,
-        ),
+        if (!auth.canContribute)
+          PressButton(
+            semanticLabel: 'Sign in to comment',
+            onTap: () => Navigator.of(context).push(
+              AppMotion.slideUp(const AuthScreen()),
+            ),
+            child: Container(
+              height: 48,
+              alignment: Alignment.center,
+              decoration: BoxDecoration(
+                color: AppColors.surface,
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(color: AppColors.hairline),
+              ),
+              child: const Text(
+                'Sign in to post a comment',
+                style: TextStyle(
+                  color: AppColors.accent,
+                  fontSize: 13.5,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ),
+          )
+        else
+          _Composer(
+            controller: _controller,
+            focusNode: _focus,
+            posting: _posting,
+            hint: auth.isSignedIn
+                ? 'Add what you saw…'
+                : 'Comment as ${auth.displayName}',
+            onSubmit: _submit,
+          ),
         if (!AppInfo.backendConfigured) ...[
           const SizedBox(height: 8),
           const Text(
@@ -163,9 +197,15 @@ class _CommentsSectionState extends State<CommentsSection> {
 }
 
 class _CommentTile extends StatelessWidget {
-  const _CommentTile({required this.comment});
+  const _CommentTile({
+    required this.comment,
+    required this.isOwn,
+    required this.onDelete,
+  });
 
   final SpotComment comment;
+  final bool isOwn;
+  final Future<void> Function() onDelete;
 
   @override
   Widget build(BuildContext context) {
@@ -240,6 +280,43 @@ class _CommentTile extends StatelessWidget {
                 ),
               ],
             ),
+          ),
+          PopupMenuButton<String>(
+            tooltip: 'Comment options',
+            icon: const Icon(
+              Icons.more_vert_rounded,
+              size: 16,
+              color: AppColors.textFaint,
+            ),
+            color: AppColors.surfaceElevated,
+            onSelected: (value) async {
+              if (value == 'delete') {
+                await onDelete();
+              } else if (value == 'report') {
+                await showReportSheet(
+                  context,
+                  targetType: 'comment',
+                  targetId: comment.id,
+                  authorId: comment.authorId,
+                  authorName: comment.authorName,
+                );
+              }
+            },
+            itemBuilder: (_) => [
+              if (isOwn)
+                const PopupMenuItem(
+                  value: 'delete',
+                  child: Text(
+                    'Delete comment',
+                    style: TextStyle(color: AppColors.danger),
+                  ),
+                )
+              else
+                const PopupMenuItem(
+                  value: 'report',
+                  child: Text('Report comment'),
+                ),
+            ],
           ),
         ],
       ),

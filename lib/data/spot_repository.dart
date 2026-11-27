@@ -19,6 +19,26 @@ class AppException implements Exception {
 abstract class SpotRepository {
   Future<List<Spot>> fetchSpots();
 
+  /// Geo-scoped, paginated spot fetch for large catalogs. Defaults to [fetchSpots]
+  /// for in-memory repositories.
+  Future<List<Spot>> fetchSpotsNear({
+    required double lat,
+    required double lng,
+    double radiusKm = 50,
+    int limit = 100,
+    int offset = 0,
+  }) =>
+      fetchSpots();
+
+  /// Refreshes a single spot by id when available, or returns `null`.
+  Future<Spot?> fetchSpot(String spotId) async {
+    final all = await fetchSpots();
+    for (final s in all) {
+      if (s.id == spotId) return s;
+    }
+    return null;
+  }
+
   /// Saved spot IDs for the current user, or `null` when the source does not
   /// own save state (the app then falls back to local persistence).
   Future<Set<String>?> fetchSavedIds();
@@ -41,6 +61,25 @@ abstract class SpotRepository {
   /// Adds a comment as the signed-in user and returns the stored row.
   Future<SpotComment> addComment({required String spotId, required String body});
 
+  /// Deletes a comment owned by the current user.
+  Future<void> deleteComment(String commentId) async {}
+
+  /// Deletes a spot owned by the current user.
+  Future<void> deleteSpot(String spotId) async {}
+
+  /// Reports inappropriate content for moderation review (Google Play UGC).
+  Future<void> reportContent({
+    required String targetType,
+    required String targetId,
+    required String reason,
+    String? details,
+  }) async {}
+
+  /// Blocks or unblocks another user's content.
+  Future<Set<String>?> fetchBlockedUserIds() async => null;
+  Future<void> blockUser(String userId) async {}
+  Future<void> unblockUser(String userId) async {}
+
   Future<Spot> submitSpot({
     required String title,
     required String description,
@@ -48,8 +87,35 @@ abstract class SpotRepository {
     required String city,
     required List<String> tags,
     String? bestTime,
+    String? focalLength,
+    bool? tripodFriendly,
+    String? accessNote,
     Uint8List? photoBytes,
   });
+
+  /// Updates mutable metadata on a spot owned by the active user.
+  Future<Spot> updateSpot({
+    required String spotId,
+    required String title,
+    required String description,
+    required String city,
+    required List<String> tags,
+    String? bestTime,
+    String? focalLength,
+    bool? tripodFriendly,
+    String? accessNote,
+  }) async {
+    throw const AppException('Editing spots is unavailable.');
+  }
+
+  /// Contributes an additional photo to an existing spot.
+  Future<SpotPhoto> addSpotPhoto({
+    required String spotId,
+    required Uint8List photoBytes,
+    String? caption,
+  }) async {
+    throw const AppException('Adding photos is unavailable.');
+  }
 }
 
 /// In-memory repository with curated seed data. Powers the app until
@@ -77,6 +143,16 @@ class MockSpotRepository implements SpotRepository {
 
   @override
   Future<List<Spot>> fetchSpots() async => List.unmodifiable(_spots);
+
+  @override
+  Future<List<Spot>> fetchSpotsNear({
+    required double lat,
+    required double lng,
+    double radiusKm = 50,
+    int limit = 100,
+    int offset = 0,
+  }) =>
+      fetchSpots();
 
   @override
   Future<Set<String>?> fetchSavedIds() async => null;
@@ -151,6 +227,53 @@ class MockSpotRepository implements SpotRepository {
   }
 
   @override
+  Future<Spot?> fetchSpot(String spotId) async {
+    for (final s in _spots) {
+      if (s.id == spotId) return s;
+    }
+    return null;
+  }
+
+  @override
+  Future<void> deleteComment(String commentId) async {
+    final idx = _comments.indexWhere((c) => c.id == commentId);
+    if (idx == -1) return;
+    final removed = _comments.removeAt(idx);
+    final spotIdx = _spots.indexWhere((s) => s.id == removed.spotId);
+    if (spotIdx != -1) {
+      final next = _spots[spotIdx].commentCount - 1;
+      _spots[spotIdx] = _spots[spotIdx].copyWith(
+        commentCount: next < 0 ? 0 : next,
+      );
+    }
+  }
+
+  @override
+  Future<void> deleteSpot(String spotId) async {
+    _spots.removeWhere((s) => s.id == spotId);
+    _comments.removeWhere((c) => c.spotId == spotId);
+    _savedIds.remove(spotId);
+    _likedIds.remove(spotId);
+  }
+
+  @override
+  Future<void> reportContent({
+    required String targetType,
+    required String targetId,
+    required String reason,
+    String? details,
+  }) async {}
+
+  @override
+  Future<Set<String>?> fetchBlockedUserIds() async => null;
+
+  @override
+  Future<void> blockUser(String userId) async {}
+
+  @override
+  Future<void> unblockUser(String userId) async {}
+
+  @override
   Future<Spot> submitSpot({
     required String title,
     required String description,
@@ -158,6 +281,9 @@ class MockSpotRepository implements SpotRepository {
     required String city,
     required List<String> tags,
     String? bestTime,
+    String? focalLength,
+    bool? tripodFriendly,
+    String? accessNote,
     Uint8List? photoBytes,
   }) async {
     final stamp = DateTime.now().millisecondsSinceEpoch;
@@ -169,8 +295,12 @@ class MockSpotRepository implements SpotRepository {
       city: city,
       tags: tags,
       bestTime: bestTime,
+      focalLength: focalLength,
+      tripodFriendly: tripodFriendly,
+      accessNote: accessNote,
       createdAt: DateTime.now(),
-      submittedBy: 'you',
+      submittedBy: 'You',
+      submittedById: 'you',
       photos: [
         SpotPhoto(
           id: 'p-$stamp',
@@ -186,6 +316,57 @@ class MockSpotRepository implements SpotRepository {
     );
     _spots.insert(0, spot);
     return spot;
+  }
+
+  @override
+  Future<Spot> updateSpot({
+    required String spotId,
+    required String title,
+    required String description,
+    required String city,
+    required List<String> tags,
+    String? bestTime,
+    String? focalLength,
+    bool? tripodFriendly,
+    String? accessNote,
+  }) async {
+    final idx = _spots.indexWhere((s) => s.id == spotId);
+    if (idx == -1) throw const AppException('Spot not found.');
+    final updated = _spots[idx].copyWith(
+      title: title,
+      description: description,
+      city: city,
+      tags: tags,
+      bestTime: bestTime,
+      focalLength: focalLength,
+      tripodFriendly: tripodFriendly,
+      accessNote: accessNote,
+    );
+    _spots[idx] = updated;
+    return updated;
+  }
+
+  @override
+  Future<SpotPhoto> addSpotPhoto({
+    required String spotId,
+    required Uint8List photoBytes,
+    String? caption,
+  }) async {
+    final idx = _spots.indexWhere((s) => s.id == spotId);
+    if (idx == -1) throw const AppException('Spot not found.');
+    final stamp = DateTime.now().millisecondsSinceEpoch;
+    final photo = SpotPhoto(
+      id: 'p-$stamp',
+      url: 'https://picsum.photos/seed/$spotId-$stamp/900/700',
+      caption: caption,
+      uploadedBy: 'You',
+      takenAt: DateTime.now(),
+      bytes: photoBytes,
+    );
+    _spots[idx] = _spots[idx].copyWith(
+      photos: [..._spots[idx].photos, photo],
+    );
+    return photo;
   }
 }
 

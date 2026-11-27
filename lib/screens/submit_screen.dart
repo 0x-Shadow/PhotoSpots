@@ -15,6 +15,7 @@ import '../services/geocoding.dart';
 import '../services/photo_compression.dart';
 import '../services/photo_metadata.dart';
 import '../state/app_state.dart';
+import '../state/auth_state.dart';
 import '../state/location_outcome.dart';
 import '../state/settings_state.dart';
 import '../theme/app_animations.dart';
@@ -23,18 +24,18 @@ import '../utils/format.dart';
 import '../widgets/location_prompt.dart';
 import '../widgets/map_pin.dart';
 import '../widgets/spot_details_form.dart';
+import 'auth_screen.dart';
+import 'legal_screen.dart';
 
-/// Three deliberate steps: photo, location, details. The city comes from the
-/// pin, never from a hardcoded default.
+/// Streamlined 2-step spot composer:
+///   1. Pick or capture a photo (EXIF GPS is read locally before compression).
+///   2. Fine-tune the pin, add a title/tags, and publish in one tap.
 class SubmitScreen extends StatefulWidget {
   const SubmitScreen({super.key, this.initialStep = 0});
 
-  /// Optional entry step — tests use it to reach the map without faking the
-  /// platform photo picker.
+  /// Optional entry step — tests use `initialStep: 1` to inspect the map/form.
   final int initialStep;
 
-  /// A cached user fix wins; otherwise the map's own centre is used. The demo
-  /// seed is only a last resort for a map that has not laid out yet.
   static LatLng initialPin(AppState state, {LatLng? mapCenter}) {
     if (state.hasCachedFix) return state.referenceLocation;
     return mapCenter ?? AppState.fallbackCenter;
@@ -45,10 +46,7 @@ class SubmitScreen extends StatefulWidget {
 }
 
 class _SubmitScreenState extends State<SubmitScreen> {
-  int _step = 0;
-
-  /// True when the pin came from the demo seed rather than the user's last
-  /// fix, so the UI can say so instead of implying a real location.
+  late int _step = widget.initialStep.clamp(0, 1);
   bool _usingDemoSeed = false;
 
   final _draft = SpotDraftController();
@@ -73,12 +71,9 @@ class _SubmitScreenState extends State<SubmitScreen> {
   bool _submitting = false;
   List<PlaceSuggestion> _suggestions = const [];
 
-  static const _stepTitles = ['Photo', 'Location', 'Details'];
-
   @override
   void initState() {
     super.initState();
-    _step = widget.initialStep;
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       final state = context.read<AppState>();
@@ -98,18 +93,10 @@ class _SubmitScreenState extends State<SubmitScreen> {
     super.dispose();
   }
 
-  bool get _canProceed => switch (_step) {
-        0 => _photoBytes != null,
-        1 => true,
-        _ => _draft.canPublish,
-      };
-
   Future<void> _pickPhoto(ImageSource source) async {
     final messenger = ScaffoldMessenger.of(context);
     final navigator = Navigator.of(context);
     try {
-      // Deliberately not downscaling or re-compressing: re-encoding can strip
-      // the EXIF block that tells us where the photo was taken.
       final picked = await ImagePicker().pickImage(source: source);
       if (picked == null) return;
       final bytes = await picked.readAsBytes();
@@ -118,9 +105,7 @@ class _SubmitScreenState extends State<SubmitScreen> {
       setState(() {
         _photoBytes = bytes;
         _photoLocation = gps;
-        // The system picker is already a deliberate decision; do not ask for
-        // another confirmation tap before continuing.
-        if (_step == 0) _step = 1;
+        _step = 1;
       });
       if (gps != null) _applyPhotoLocation(gps);
     } catch (_) {
@@ -137,7 +122,6 @@ class _SubmitScreenState extends State<SubmitScreen> {
     }
   }
 
-  /// Places the pin where the photo was taken and fills the address from it.
   void _applyPhotoLocation(PhotoLocation gps) {
     final point = LatLng(gps.latitude, gps.longitude);
     setState(() {
@@ -151,15 +135,11 @@ class _SubmitScreenState extends State<SubmitScreen> {
       if (!mounted || !_mapReadyForPin) return;
       try {
         _mapController.move(point, 15);
-      } catch (_) {
-        // The map attaches on the next frame; its initial centre is the pin.
-      }
+      } catch (_) {}
     });
     _resolveAddress(point);
   }
 
-  /// The map settled somewhere new. Only real changes move the pin, so
-  /// programmatic jumps never clear a city the user just chose.
   void _onCenterChanged(LatLng point) {
     if ((_pinned.latitude - point.latitude).abs() < 1e-7 &&
         (_pinned.longitude - point.longitude).abs() < 1e-7) {
@@ -173,8 +153,6 @@ class _SubmitScreenState extends State<SubmitScreen> {
     _resolveAddress(point);
   }
 
-  /// Debounced reverse lookup. A failure keeps the pin and reveals the manual
-  /// city field rather than blocking publishing.
   void _resolveAddress(LatLng point) {
     _reverseTimer?.cancel();
     _reverseTimer = Timer(const Duration(milliseconds: 450), () async {
@@ -237,6 +215,7 @@ class _SubmitScreenState extends State<SubmitScreen> {
       _searchEmpty = false;
       _searchFailed = false;
       _resolving = false;
+      _usingDemoSeed = false;
       _cityManual = suggestion.city.isEmpty;
       _draft
         ..city = suggestion.city
@@ -244,9 +223,7 @@ class _SubmitScreenState extends State<SubmitScreen> {
     });
     try {
       _mapController.move(point, 15);
-    } catch (_) {
-      // The controller attaches once the map lays out.
-    }
+    } catch (_) {}
   }
 
   Future<void> _useMyLocation() async {
@@ -264,136 +241,36 @@ class _SubmitScreenState extends State<SubmitScreen> {
     });
     try {
       _mapController.move(point, 15);
-    } catch (_) {
-      // The controller attaches once the map lays out.
-    }
+    } catch (_) {}
     _resolveAddress(point);
   }
 
-  Future<void> _confirmPublish() async {
-    if (_submitting || !_draft.canPublish) return;
-    final confirmed = await showModalBottomSheet<bool>(
-      context: context,
-      isScrollControlled: true,
-      showDragHandle: true,
-      backgroundColor: AppColors.surfaceElevated,
-      builder: (sheetContext) => SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(22, 6, 22, 22),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text('Ready to publish?', style: Theme.of(sheetContext).textTheme.titleLarge),
-              const SizedBox(height: 14),
-              Row(
-                children: [
-                  ClipRRect(
-                    borderRadius: BorderRadius.circular(12),
-                    child: SizedBox(
-                      width: 64,
-                      height: 64,
-                      child: _photoBytes == null
-                          ? const Icon(Icons.image_rounded,
-                              color: AppColors.textFaint, size: 28)
-                          : Image.memory(_photoBytes!, fit: BoxFit.cover),
-                    ),
-                  ),
-                  const SizedBox(width: 14),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(_draft.name,
-                            style: Theme.of(sheetContext).textTheme.titleMedium),
-                        const SizedBox(height: 3),
-                        Text(
-                          _draft.city.isEmpty
-                              ? 'City not set'
-                              : _draft.city,
-                          style: Theme.of(sheetContext).textTheme.bodySmall,
-                        ),
-                        if (_address.isNotEmpty)
-                          Text(
-                            _address,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: Theme.of(sheetContext).textTheme.bodySmall,
-                          ),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 20),
-              Row(
-                children: [
-                  Expanded(
-                    child: TextButton(
-                      onPressed: () => Navigator.of(sheetContext).pop(false),
-                      child: const Text('Keep editing'),
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: PressButton(
-                      semanticLabel: 'Publish spot',
-                      onTap: () => Navigator.of(sheetContext).pop(true),
-                      child: Container(
-                        height: 48,
-                        alignment: Alignment.center,
-                        decoration: BoxDecoration(
-                          color: AppColors.action,
-                          borderRadius: BorderRadius.circular(14),
-                        ),
-                        child: Text(
-                          'Publish',
-                          style: Theme.of(sheetContext)
-                              .textTheme
-                              .labelLarge
-                              ?.copyWith(
-                                color: AppColors.onAction,
-                                fontWeight: FontWeight.w800,
-                              ),
-                        ),
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-    if (confirmed != true || !mounted) return;
-    await _publish();
-  }
-
   Future<void> _publish() async {
-    if (_submitting) return;
+    if (_submitting || !_draft.canPublish) return;
     final messenger = ScaffoldMessenger.of(context);
     final navigator = Navigator.of(context);
     final app = context.read<AppState>();
     setState(() => _submitting = true);
 
     try {
-      // The EXIF GPS was read from the original bytes at pick time; only the
-      // upload is downscaled, so a multi-megapixel camera shot no longer costs
-      // seconds of upload and a large storage object.
+      // EXIF GPS was already extracted at pick time; compressForUpload strips
+      // raw EXIF/XMP metadata before uploading to public storage.
       final photoBytes =
           _photoBytes == null ? null : await compressForUpload(_photoBytes!);
       await app.submitSpot(
-            title: _draft.name.trim(),
-            description: _draft.tip.trim().isEmpty
-                ? 'A photo spot shared by the ${AppInfo.name} community.'
-                : _draft.tip.trim(),
-            location: _pinned,
-            city: _draft.city.trim(),
-            tags: _draft.tags.toList(),
-            bestTime: _draft.bestTime,
-            photoBytes: photoBytes,
-          );
+        title: _draft.name.trim(),
+        description: _draft.tip.trim().isEmpty
+            ? 'A photo spot shared by the ${AppInfo.name} community.'
+            : _draft.tip.trim(),
+        location: _pinned,
+        city: _draft.city.trim(),
+        tags: _draft.tags.toList(),
+        bestTime: _draft.bestTime,
+        focalLength: _draft.focalLength,
+        tripodFriendly: _draft.tripodFriendly,
+        accessNote: _draft.accessNote.trim(),
+        photoBytes: photoBytes,
+      );
       if (!mounted) return;
       navigator.pop();
       messenger.showSnackBar(
@@ -416,8 +293,8 @@ class _SubmitScreenState extends State<SubmitScreen> {
   }
 
   void _back() {
-    if (_step > 0) {
-      setState(() => _step--);
+    if (_step > 0 && widget.initialStep == 0) {
+      setState(() => _step = 0);
     } else {
       Navigator.of(context).maybePop();
     }
@@ -425,8 +302,92 @@ class _SubmitScreenState extends State<SubmitScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final auth = context.watch<AuthState>();
+
+    // Restrict publishing to real accounts when the backend is active.
+    if (!auth.canContribute) {
+      return Scaffold(
+        backgroundColor: AppColors.background,
+        appBar: AppBar(
+          leading: IconButton(
+            tooltip: 'Close',
+            icon: const Icon(Icons.close_rounded),
+            onPressed: () => Navigator.of(context).maybePop(),
+          ),
+          title: const Text('Share a spot'),
+        ),
+        body: SafeArea(
+          child: ResponsiveBody(
+            maxWidth: 460,
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(24, 16, 24, 32),
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(24),
+                    child: Image.asset(
+                      'assets/images/upload_hero.jpg',
+                      width: 180,
+                      height: 180,
+                      fit: BoxFit.cover,
+                    ),
+                  ),
+                  const SizedBox(height: 22),
+                  const Text(
+                    'Sign in to share spots',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      color: AppColors.textPrimary,
+                      fontSize: 24,
+                      fontWeight: FontWeight.w800,
+                      letterSpacing: -0.6,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  const Text(
+                    'Publishing is restricted to signed-in accounts so '
+                    'contributors get credit and the map stays spam-free.',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      color: AppColors.textSecondary,
+                      fontSize: 13.5,
+                      height: 1.45,
+                    ),
+                  ),
+                  const SizedBox(height: 24),
+                  PressButton(
+                    semanticLabel: 'Sign in or create account',
+                    onTap: () => Navigator.of(context).push(
+                      AppMotion.slideUp(const AuthScreen()),
+                    ),
+                    child: Container(
+                      height: 52,
+                      alignment: Alignment.center,
+                      decoration: BoxDecoration(
+                        color: AppColors.action,
+                        borderRadius: BorderRadius.circular(999),
+                      ),
+                      child: const Text(
+                        'Sign in or create account',
+                        style: TextStyle(
+                          color: AppColors.onAction,
+                          fontSize: 14.5,
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      );
+    }
+
     return PopScope(
-      canPop: _step == 0,
+      canPop: _step == 0 || widget.initialStep != 0,
       onPopInvokedWithResult: (didPop, _) {
         if (!didPop) _back();
       },
@@ -452,209 +413,89 @@ class _SubmitScreenState extends State<SubmitScreen> {
               ),
             ),
           ),
-          title: Text(_stepTitles[_step]),
+          title: Text(_step == 0 ? 'New Spot' : 'Pin & Details'),
           centerTitle: true,
-        ),
-        body: SafeArea(
-          child: ResponsiveBody(
-            child: Column(
-              children: [
-                _ProgressBar(step: _step, titles: _stepTitles),
-                if (_step == 2)
-                  Expanded(
-                    child: SpotDetailsForm(
-                      controller: _draft,
-                      initialName: _draft.name,
-                      initialCity: _draft.city,
-                      location: _pinned,
-                      address: _address,
-                      cityEditable: _cityManual,
-                      onChangeLocation: () => setState(() => _step = 1),
-                      onPublish: _confirmPublish,
-                    ),
-                  )
-                else ...[
-                  Expanded(child: _stepContent()),
-                  _BottomBar(
-                    step: _step,
-                    enabled: _canProceed && !_submitting,
-                    onNext: () {
-                      if (_canProceed) setState(() => _step++);
-                    },
+          actions: [
+            Padding(
+              padding: const EdgeInsets.only(right: 14),
+              child: Center(
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 10,
+                    vertical: 5,
                   ),
-                ],
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _stepContent() => switch (_step) {
-        0 => _PhotoStep(
-            photoBytes: _photoBytes,
-            photoLocation: _photoLocation,
-            onPick: _pickPhoto,
-            onClear: () => setState(() {
-              _photoBytes = null;
-              _photoLocation = null;
-            }),
-          ),
-        _ => _LocationStep(
-            pinned: _pinned,
-            usingDemoSeed: _usingDemoSeed,
-            address: _address,
-            city: _draft.city,
-            cityEditable: _cityManual,
-            photoDetected: _photoLocation != null,
-            suggestions: _suggestions,
-            searching: _searching,
-            searchFailed: _searchFailed,
-            searchEmpty: _searchEmpty,
-            resolving: _resolving,
-            onSearch: _search,
-            onChoose: _chooseSuggestion,
-            onCenterChanged: _onCenterChanged,
-            onTapPoint: (point) {
-              try {
-                _mapController.move(point, _mapController.camera.zoom);
-              } catch (_) {
-                // The controller attaches once the map lays out.
-              }
-            },
-            onMapReady: () => _mapReadyForPin = true,
-            onUseMyLocation: _useMyLocation,
-            onCityChanged: (value) => setState(() => _draft.city = value),
-            streetFallback: _streetFallback,
-            onFallback: () {
-              if (_streetFallback) return;
-              setState(() => _streetFallback = true);
-            },
-            mapController: _mapController,
-            searchController: _searchController,
-          ),
-      };
-}
-
-class _ProgressBar extends StatelessWidget {
-  const _ProgressBar({required this.step, required this.titles});
-
-  final int step;
-  final List<String> titles;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context).textTheme;
-    final motion = MediaQuery.disableAnimationsOf(context)
-        ? Duration.zero
-        : AppMotion.quick;
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(20, 6, 20, 14),
-      child: Row(
-        children: [
-          for (var i = 0; i < titles.length; i++) ...[
-            if (i > 0) const SizedBox(width: 8),
-            Expanded(
-              child: AnimatedContainer(
-                duration: motion,
-                curve: AppMotion.easeOut,
-                height: 34,
-                alignment: Alignment.center,
-                decoration: BoxDecoration(
-                  color: i == step
-                      ? AppColors.action
-                      : i < step
-                          ? const Color(0x14FFFFFF)
-                          : Colors.transparent,
-                  borderRadius: BorderRadius.circular(10),
-                  border: Border.all(
-                    color: i == step
-                        ? AppColors.action
-                        : i < step
-                            ? Colors.transparent
-                            : AppColors.hairline,
+                  decoration: BoxDecoration(
+                    color: const Color(0x14FFFFFF),
+                    borderRadius: BorderRadius.circular(999),
+                    border: Border.all(color: AppColors.hairline),
                   ),
-                ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    if (i < step) ...[
-                      const Icon(
-                        Icons.check_rounded,
-                        size: 13,
-                        color: AppColors.textSecondary,
-                      ),
-                      const SizedBox(width: 4),
-                    ],
-                    Flexible(
-                      child: Text(
-                        titles[i],
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: theme.labelMedium?.copyWith(
-                          fontSize: 11.5,
-                          fontWeight:
-                              i == step ? FontWeight.w800 : FontWeight.w500,
-                          color: i == step
-                              ? AppColors.onAction
-                              : i < step
-                                  ? AppColors.textSecondary
-                                  : AppColors.textFaint,
-                        ),
-                      ),
+                  child: Text(
+                    'Step ${_step + 1} of 2',
+                    style: const TextStyle(
+                      color: AppColors.textSecondary,
+                      fontSize: 11,
+                      fontWeight: FontWeight.w700,
                     ),
-                  ],
+                  ),
                 ),
               ),
             ),
           ],
-        ],
-      ),
-    );
-  }
-}
-
-class _BottomBar extends StatelessWidget {
-  const _BottomBar({
-    required this.step,
-    required this.enabled,
-    required this.onNext,
-  });
-
-  final int step;
-  final bool enabled;
-  final VoidCallback onNext;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context).textTheme;
-    return Container(
-      padding: const EdgeInsets.fromLTRB(20, 12, 20, 10),
-      decoration: BoxDecoration(
-        color: AppColors.background,
-        border: Border(top: BorderSide(color: AppColors.hairline)),
-      ),
-      child: SafeArea(
-        top: false,
-        child: PressButton(
-          semanticLabel: 'Next step',
-          enabled: enabled,
-          onTap: onNext,
-          child: Container(
-            height: 52,
-            alignment: Alignment.center,
-                            decoration: BoxDecoration(
-              color: enabled ? AppColors.action : AppColors.hairline,
-              borderRadius: BorderRadius.circular(16),
-            ),
-            child: Text(
-              step == 0 ? 'Next' : 'Continue',
-              style: theme.labelLarge?.copyWith(
-                color:
-                    enabled ? AppColors.onAction : AppColors.textFaint,
-                fontWeight: FontWeight.w800,
-              ),
+        ),
+        body: SafeArea(
+          child: ResponsiveBody(
+            maxWidth: 640,
+            child: AnimatedSwitcher(
+              duration: AppMotion.quick,
+              child: _step == 0
+                  ? _PhotoStudioStep(
+                      key: const ValueKey('step-photo'),
+                      photoBytes: _photoBytes,
+                      photoLocation: _photoLocation,
+                      onPick: _pickPhoto,
+                      onContinue: _photoBytes == null
+                          ? null
+                          : () => setState(() => _step = 1),
+                    )
+                  : _PinAndDetailsStep(
+                      key: const ValueKey('step-details'),
+                      photoBytes: _photoBytes,
+                      photoLocation: _photoLocation,
+                      pinned: _pinned,
+                      usingDemoSeed: _usingDemoSeed,
+                      address: _address,
+                      cityEditable: _cityManual,
+                      suggestions: _suggestions,
+                      searching: _searching,
+                      searchFailed: _searchFailed,
+                      searchEmpty: _searchEmpty,
+                      resolving: _resolving,
+                      submitting: _submitting,
+                      streetFallback: _streetFallback,
+                      draft: _draft,
+                      mapController: _mapController,
+                      searchController: _searchController,
+                      onChangePhoto: () => setState(() => _step = 0),
+                      onSearch: _search,
+                      onChoose: _chooseSuggestion,
+                      onCenterChanged: _onCenterChanged,
+                      onTapPoint: (point) {
+                        try {
+                          _mapController.move(
+                            point,
+                            _mapController.camera.zoom,
+                          );
+                        } catch (_) {}
+                      },
+                      onMapReady: () => _mapReadyForPin = true,
+                      onUseMyLocation: _useMyLocation,
+                      onFallback: () {
+                        if (!_streetFallback) {
+                          setState(() => _streetFallback = true);
+                        }
+                      },
+                      onPublish: _publish,
+                    ),
             ),
           ),
         ),
@@ -663,20 +504,19 @@ class _BottomBar extends StatelessWidget {
   }
 }
 
-/// Step one: one clear photo card, the two ways to add it, and a note about
-/// the location we can read from the file.
-class _PhotoStep extends StatelessWidget {
-  const _PhotoStep({
+class _PhotoStudioStep extends StatelessWidget {
+  const _PhotoStudioStep({
+    super.key,
     required this.photoBytes,
     required this.photoLocation,
     required this.onPick,
-    required this.onClear,
+    required this.onContinue,
   });
 
   final Uint8List? photoBytes;
   final PhotoLocation? photoLocation;
   final ValueChanged<ImageSource> onPick;
-  final VoidCallback onClear;
+  final VoidCallback? onContinue;
 
   @override
   Widget build(BuildContext context) {
@@ -684,329 +524,194 @@ class _PhotoStep extends StatelessWidget {
     final hasPhoto = photoBytes != null;
 
     return ListView(
-      padding: const EdgeInsets.fromLTRB(20, 6, 20, 28),
+      padding: const EdgeInsets.fromLTRB(20, 8, 20, 32),
       children: [
-        Text(
+        const Text(
           'Show the spot at its best',
-          style: theme.titleLarge?.copyWith(
-            fontSize: 24,
-            height: 1.15,
-            letterSpacing: -0.7,
+          style: TextStyle(
+            color: AppColors.textPrimary,
+            fontSize: 26,
+            height: 1.12,
+            fontWeight: FontWeight.w800,
+            letterSpacing: -0.8,
           ),
         ),
         const SizedBox(height: 6),
         Text(
-          hasPhoto
-              ? 'Swap it anytime before you publish.'
-              : 'One photo becomes the cover of the spot.',
+          'Pick a photo and we’ll read its GPS locally to place the pin, '
+          'then strip personal metadata before upload.',
           style: theme.bodyMedium,
         ),
-        const SizedBox(height: 18),
-        LayoutBuilder(
-          builder: (context, constraints) {
-            final height =
-                (constraints.maxWidth * 1.14).clamp(280.0, 420.0).toDouble();
-            return SizedBox(
-              height: height,
-              child: AnimatedSwitcher(
-                duration: AppMotion.quick,
-                switchInCurve: AppMotion.easeOut,
-                child: hasPhoto
-                    ? _PhotoPreview(
-                        key: const ValueKey('preview'),
-                        bytes: photoBytes!,
-                        location: photoLocation,
-                        onClear: onClear,
-                      )
-                    : _PhotoDropzone(
-                        key: const ValueKey('dropzone'),
-                        onPick: onPick,
-                      ),
+        const SizedBox(height: 20),
+        GestureDetector(
+          onTap: () => onPick(ImageSource.gallery),
+          behavior: HitTestBehavior.opaque,
+          child: Container(
+            height: 310,
+            decoration: BoxDecoration(
+              color: AppColors.surface,
+              borderRadius: BorderRadius.circular(24),
+              border: Border.all(
+                color: hasPhoto
+                    ? AppColors.accent.withValues(alpha: 0.45)
+                    : const Color(0x26FFFFFF),
               ),
-            );
-          },
+              boxShadow: const [
+                BoxShadow(
+                  color: Color(0x66000000),
+                  blurRadius: 24,
+                  offset: Offset(0, 10),
+                ),
+              ],
+            ),
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(23),
+              child: Stack(
+                fit: StackFit.expand,
+                children: [
+                  if (hasPhoto)
+                    Image.memory(
+                      photoBytes!,
+                      fit: BoxFit.cover,
+                      cacheWidth: 1080,
+                    )
+                  else
+                    Image.asset(
+                      'assets/images/upload_hero.jpg',
+                      fit: BoxFit.cover,
+                      errorBuilder: (_, _, _) =>
+                          const ColoredBox(color: AppColors.surfaceElevated),
+                    ),
+                  const DecoratedBox(
+                    decoration: BoxDecoration(
+                      gradient: LinearGradient(
+                        begin: Alignment.topCenter,
+                        end: Alignment.bottomCenter,
+                        colors: [
+                          Color(0x22000000),
+                          Color(0x33000000),
+                          Color(0xCC0A0A0B),
+                        ],
+                        stops: [0.0, 0.5, 1.0],
+                      ),
+                    ),
+                  ),
+                  Positioned(
+                    left: 18,
+                    right: 18,
+                    bottom: 18,
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        if (hasPhoto && photoLocation != null)
+                          Container(
+                            margin: const EdgeInsets.only(bottom: 8),
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 10,
+                              vertical: 5,
+                            ),
+                            decoration: BoxDecoration(
+                              color: const Color(0xB3000000),
+                              borderRadius: BorderRadius.circular(999),
+                              border: Border.all(
+                                color: AppColors.success.withValues(alpha: 0.5),
+                              ),
+                            ),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                const Icon(
+                                  Icons.gps_fixed_rounded,
+                                  color: AppColors.success,
+                                  size: 13,
+                                ),
+                                const SizedBox(width: 5),
+                                Text(
+                                  'GPS detected · $photoLocation',
+                                  style: const TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        Text(
+                          hasPhoto ? 'Tap to swap photo' : 'Tap to choose a photo',
+                          style: const TextStyle(
+                            color: AppColors.textPrimary,
+                            fontSize: 17,
+                            fontWeight: FontWeight.w800,
+                          ),
+                        ),
+                        const SizedBox(height: 3),
+                        const Text(
+                          'JPEG, PNG or HEIC · EXIF metadata stripped on upload',
+                          style: TextStyle(
+                            color: Color(0xCCFFFFFF),
+                            fontSize: 12,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
         ),
-        const SizedBox(height: 14),
-        _PhotoLocationNote(
-          hasPhoto: hasPhoto,
-          location: photoLocation,
-        ),
-        const SizedBox(height: 18),
+        const SizedBox(height: 16),
         Row(
           children: [
             Expanded(
-              child: _PhotoSourceButton(
+              child: _StudioButton(
                 icon: Icons.photo_library_rounded,
-                label: hasPhoto ? 'Replace' : 'Choose photo',
+                label: hasPhoto ? 'Choose another' : 'Gallery',
                 filled: true,
                 onTap: () => onPick(ImageSource.gallery),
               ),
             ),
             const SizedBox(width: 10),
             Expanded(
-              child: _PhotoSourceButton(
+              child: _StudioButton(
                 icon: Icons.photo_camera_rounded,
-                label: hasPhoto ? 'Retake' : 'Camera',
+                label: 'Camera',
                 onTap: () => onPick(ImageSource.camera),
               ),
             ),
           ],
         ),
-        const SizedBox(height: 14),
-        Text(
-          'The original file is checked for GPS before anything is uploaded.',
-          textAlign: TextAlign.center,
-          style: theme.bodySmall?.copyWith(color: AppColors.textFaint),
-        ),
+        if (onContinue != null) ...[
+          const SizedBox(height: 12),
+          PressButton(
+            semanticLabel: 'Continue to pin and details',
+            onTap: onContinue!,
+            child: Container(
+              height: 52,
+              alignment: Alignment.center,
+              decoration: BoxDecoration(
+                color: AppColors.accent,
+                borderRadius: BorderRadius.circular(16),
+              ),
+              child: const Text(
+                'Continue to Pin & Details',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 14.5,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+            ),
+          ),
+        ],
       ],
     );
   }
 }
 
-class _PhotoDropzone extends StatelessWidget {
-  const _PhotoDropzone({super.key, required this.onPick});
-
-  final ValueChanged<ImageSource> onPick;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context).textTheme;
-    return GestureDetector(
-      onTap: () => onPick(ImageSource.gallery),
-      behavior: HitTestBehavior.opaque,
-      child: Container(
-        decoration: BoxDecoration(
-          color: AppColors.surface,
-          borderRadius: BorderRadius.circular(24),
-          border: Border.all(color: const Color(0x24FFFFFF)),
-        ),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Container(
-              width: 66,
-              height: 66,
-              decoration: BoxDecoration(
-                color: AppColors.accentSoft,
-                borderRadius: BorderRadius.circular(20),
-                border: Border.all(
-                  color: AppColors.accent.withValues(alpha: 0.25),
-                ),
-              ),
-              child: const Icon(
-                Icons.add_photo_alternate_rounded,
-                color: AppColors.accent,
-                size: 28,
-              ),
-            ),
-            const SizedBox(height: 18),
-            Text('Add your cover photo', style: theme.titleMedium),
-            const SizedBox(height: 6),
-            Text(
-              'JPEG, PNG or HEIC · tap to browse',
-              style: theme.bodySmall,
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _PhotoPreview extends StatelessWidget {
-  const _PhotoPreview({
-    super.key,
-    required this.bytes,
-    this.location,
-    required this.onClear,
-  });
-
-  final Uint8List bytes;
-  final PhotoLocation? location;
-  final VoidCallback onClear;
-
-  @override
-  Widget build(BuildContext context) {
-    final found = location != null;
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(24),
-      child: Stack(
-        fit: StackFit.expand,
-        children: [
-          Image.memory(
-            bytes,
-            fit: BoxFit.cover,
-            cacheWidth: 1080,
-            errorBuilder: (_, _, _) => const ColoredBox(
-              color: AppColors.surfaceElevated,
-              child: Center(
-                child: Icon(
-                  Icons.broken_image_rounded,
-                  color: AppColors.textFaint,
-                  size: 34,
-                ),
-              ),
-            ),
-          ),
-          const DecoratedBox(
-            decoration: BoxDecoration(
-              gradient: LinearGradient(
-                begin: Alignment.topCenter,
-                end: Alignment.bottomCenter,
-                colors: [
-                  Color(0x3D000000),
-                  Color(0x00000000),
-                  Color(0xA6000000),
-                ],
-                stops: [0.0, 0.55, 1.0],
-              ),
-            ),
-          ),
-          Positioned(
-            left: 12,
-            right: 64,
-            bottom: 12,
-            child: Align(
-              alignment: Alignment.centerLeft,
-              child: Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 11, vertical: 7),
-                decoration: BoxDecoration(
-                  color: const Color(0xB3000000),
-                  borderRadius: BorderRadius.circular(999),
-                  border: Border.all(color: const Color(0x26FFFFFF)),
-                ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Icon(
-                      found
-                          ? Icons.gps_fixed_rounded
-                          : Icons.location_off_rounded,
-                      color:
-                          found ? AppColors.success : AppColors.textSecondary,
-                      size: 14,
-                    ),
-                    const SizedBox(width: 6),
-                    Flexible(
-                      child: Text(
-                        found ? 'GPS · $location' : 'No GPS data',
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 11.5,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          ),
-          Positioned(
-            top: 10,
-            right: 10,
-            child: Semantics(
-              button: true,
-              label: 'Remove photo',
-              child: IconButton(
-                onPressed: onClear,
-                tooltip: 'Remove photo',
-                icon: Container(
-                  padding: const EdgeInsets.all(7),
-                  decoration: const BoxDecoration(
-                    color: Color(0x99000000),
-                    shape: BoxShape.circle,
-                  ),
-                  child: const Icon(
-                    Icons.close_rounded,
-                    color: Colors.white,
-                    size: 19,
-                  ),
-                ),
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _PhotoLocationNote extends StatelessWidget {
-  const _PhotoLocationNote({
-    required this.hasPhoto,
-    required this.location,
-  });
-
-  final bool hasPhoto;
-  final PhotoLocation? location;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context).textTheme;
-    final found = location != null;
-    final icon = !hasPhoto
-        ? Icons.auto_awesome_rounded
-        : found
-            ? Icons.gps_fixed_rounded
-            : Icons.location_off_rounded;
-    final color = !hasPhoto
-        ? AppColors.textSecondary
-        : found
-            ? AppColors.success
-            : AppColors.textSecondary;
-    final title = !hasPhoto
-        ? 'Location from your photo'
-        : found
-            ? 'Location found'
-            : 'No location in this photo';
-    final body = !hasPhoto
-        ? 'If the original file has GPS data, the pin is placed for you.'
-        : found
-            ? '${location!} — the pin is already placed, and you can still move it.'
-            : 'Drag the map or use My location on the next step.';
-
-    return Container(
-      padding: const EdgeInsets.all(13),
-      decoration: BoxDecoration(
-        color: found ? const Color(0x1434C759) : AppColors.surface,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(
-          color: found ? const Color(0x3334C759) : AppColors.hairline,
-        ),
-      ),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Padding(
-            padding: const EdgeInsets.only(top: 1),
-            child: Icon(icon, color: color, size: 18),
-          ),
-          const SizedBox(width: 11),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  title,
-                  style: theme.titleSmall?.copyWith(fontSize: 13.5),
-                ),
-                const SizedBox(height: 2),
-                Text(body, style: theme.bodySmall?.copyWith(fontSize: 11.5)),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _PhotoSourceButton extends StatelessWidget {
-  const _PhotoSourceButton({
+class _StudioButton extends StatelessWidget {
+  const _StudioButton({
     required this.icon,
     required this.label,
     required this.onTap,
@@ -1020,17 +725,14 @@ class _PhotoSourceButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context).textTheme;
     return PressButton(
-      semanticLabel: label == 'Camera'
-          ? 'Take a photo with the camera'
-          : 'Choose a photo from the gallery',
+      semanticLabel: label,
       onTap: onTap,
       child: Container(
-        height: 50,
+        height: 52,
         decoration: BoxDecoration(
           color: filled ? AppColors.action : const Color(0x14FFFFFF),
-          borderRadius: BorderRadius.circular(14),
+          borderRadius: BorderRadius.circular(16),
           border: Border.all(
             color: filled ? AppColors.action : AppColors.hairline,
           ),
@@ -1040,19 +742,16 @@ class _PhotoSourceButton extends StatelessWidget {
           children: [
             Icon(
               icon,
-              size: 17,
+              size: 18,
               color: filled ? AppColors.onAction : AppColors.textPrimary,
             ),
-            const SizedBox(width: 7),
-            Flexible(
-              child: Text(
-                label,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: theme.labelLarge?.copyWith(
-                  color: filled ? AppColors.onAction : AppColors.textPrimary,
-                  fontWeight: FontWeight.w700,
-                ),
+            const SizedBox(width: 8),
+            Text(
+              label,
+              style: TextStyle(
+                color: filled ? AppColors.onAction : AppColors.textPrimary,
+                fontSize: 14,
+                fontWeight: FontWeight.w800,
               ),
             ),
           ],
@@ -1062,56 +761,61 @@ class _PhotoSourceButton extends StatelessWidget {
   }
 }
 
-/// Step two: search, a fixed centre pin the user can drag the map under, and an
-/// address that always describes the pin.
-class _LocationStep extends StatelessWidget {
-  const _LocationStep({
+class _PinAndDetailsStep extends StatelessWidget {
+  const _PinAndDetailsStep({
+    super.key,
+    required this.photoBytes,
+    required this.photoLocation,
     required this.pinned,
     required this.usingDemoSeed,
     required this.address,
-    required this.city,
     required this.cityEditable,
-    required this.photoDetected,
     required this.suggestions,
     required this.searching,
     required this.searchFailed,
     required this.searchEmpty,
     required this.resolving,
+    required this.submitting,
+    required this.streetFallback,
+    required this.draft,
+    required this.mapController,
+    required this.searchController,
+    required this.onChangePhoto,
     required this.onSearch,
     required this.onChoose,
     required this.onCenterChanged,
     required this.onTapPoint,
     required this.onMapReady,
     required this.onUseMyLocation,
-    required this.onCityChanged,
-    required this.streetFallback,
     required this.onFallback,
-    required this.mapController,
-    required this.searchController,
+    required this.onPublish,
   });
 
+  final Uint8List? photoBytes;
+  final PhotoLocation? photoLocation;
   final LatLng pinned;
   final bool usingDemoSeed;
   final String address;
-  final String city;
   final bool cityEditable;
-  final bool photoDetected;
   final List<PlaceSuggestion> suggestions;
   final bool searching;
   final bool searchFailed;
   final bool searchEmpty;
   final bool resolving;
+  final bool submitting;
+  final bool streetFallback;
+  final SpotDraftController draft;
+  final MapController mapController;
+  final TextEditingController searchController;
+  final VoidCallback onChangePhoto;
   final ValueChanged<String> onSearch;
   final ValueChanged<PlaceSuggestion> onChoose;
   final ValueChanged<LatLng> onCenterChanged;
   final ValueChanged<LatLng> onTapPoint;
   final VoidCallback onMapReady;
   final VoidCallback onUseMyLocation;
-  final ValueChanged<String> onCityChanged;
-  final bool streetFallback;
   final VoidCallback onFallback;
-  final MapController mapController;
-  final TextEditingController searchController;
+  final VoidCallback onPublish;
 
   @override
   Widget build(BuildContext context) {
@@ -1121,8 +825,64 @@ class _LocationStep extends StatelessWidget {
         : context.watch<SettingsState>().activeMapStyle;
 
     return ListView(
-      padding: const EdgeInsets.fromLTRB(20, 4, 20, 20),
+      padding: const EdgeInsets.fromLTRB(20, 6, 20, 40),
       children: [
+        if (photoBytes != null) ...[
+          Container(
+            padding: const EdgeInsets.all(10),
+            decoration: BoxDecoration(
+              color: AppColors.surface,
+              borderRadius: BorderRadius.circular(18),
+              border: Border.all(color: AppColors.hairline),
+            ),
+            child: Row(
+              children: [
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(12),
+                  child: Image.memory(
+                    photoBytes!,
+                    width: 60,
+                    height: 60,
+                    fit: BoxFit.cover,
+                    cacheWidth: 160,
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text(
+                        'Cover photo ready',
+                        style: TextStyle(
+                          color: AppColors.textPrimary,
+                          fontSize: 13.5,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                      const SizedBox(height: 3),
+                      Text(
+                        photoLocation != null
+                            ? 'Pinned from photo GPS · drag map to adjust'
+                            : 'No photo GPS · drag map or search below',
+                        style: theme.bodySmall?.copyWith(
+                          color: photoLocation != null
+                              ? AppColors.success
+                              : AppColors.textSecondary,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                TextButton(
+                  onPressed: onChangePhoto,
+                  child: const Text('Change'),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 14),
+        ],
         if (usingDemoSeed)
           Padding(
             padding: const EdgeInsets.only(bottom: 10),
@@ -1147,10 +907,7 @@ class _LocationStep extends StatelessWidget {
           controller: searchController,
           onChanged: onSearch,
           textInputAction: TextInputAction.search,
-          style: const TextStyle(
-            color: AppColors.textPrimary,
-            fontSize: 14.5,
-          ),
+          style: const TextStyle(color: AppColors.textPrimary, fontSize: 14.5),
           decoration: InputDecoration(
             hintText: 'Search a place, city, or address',
             prefixIcon: const Icon(Icons.search_rounded, size: 20),
@@ -1182,97 +939,70 @@ class _LocationStep extends StatelessWidget {
         if (suggestions.isNotEmpty) ...[
           const SizedBox(height: 8),
           Container(
-            constraints: const BoxConstraints(maxHeight: 232),
+            constraints: const BoxConstraints(maxHeight: 200),
             decoration: BoxDecoration(
               color: AppColors.surfaceElevated,
               borderRadius: BorderRadius.circular(16),
               border: Border.all(color: AppColors.hairline),
             ),
-            child: ClipRRect(
-              borderRadius: BorderRadius.circular(16),
-              child: ListView.separated(
-                shrinkWrap: true,
-                padding: EdgeInsets.zero,
-                itemCount: suggestions.length,
-                separatorBuilder: (_, _) =>
-                    const Divider(height: 1, color: AppColors.hairline),
-                itemBuilder: (_, i) {
-                  final suggestion = suggestions[i];
-                  return InkWell(
-                    onTap: () => onChoose(suggestion),
-                    child: Padding(
-                      padding: const EdgeInsets.fromLTRB(14, 11, 12, 11),
-                      child: Row(
-                        children: [
-                          const Icon(
-                            Icons.place_outlined,
-                            color: AppColors.accent,
-                            size: 19,
-                          ),
-                          const SizedBox(width: 11),
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  suggestion.label,
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: theme.bodyLarge?.copyWith(
-                                    color: AppColors.textPrimary,
-                                    fontSize: 14,
-                                  ),
-                                ),
-                                if (suggestion.city.isNotEmpty)
-                                  Text(
-                                    suggestion.city,
-                                    style: theme.bodySmall,
-                                  ),
-                              ],
+            child: ListView.separated(
+              shrinkWrap: true,
+              padding: EdgeInsets.zero,
+              itemCount: suggestions.length,
+              separatorBuilder: (_, _) =>
+                  const Divider(height: 1, color: AppColors.hairline),
+              itemBuilder: (_, i) {
+                final s = suggestions[i];
+                return InkWell(
+                  onTap: () => onChoose(s),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 14,
+                      vertical: 10,
+                    ),
+                    child: Row(
+                      children: [
+                        const Icon(
+                          Icons.place_outlined,
+                          color: AppColors.accent,
+                          size: 18,
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Text(
+                            s.city.isNotEmpty
+                                ? '${s.label} · ${s.city}'
+                                : s.label,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              color: AppColors.textPrimary,
+                              fontSize: 13.5,
                             ),
                           ),
-                          const Icon(
-                            Icons.north_west_rounded,
-                            color: AppColors.textFaint,
-                            size: 16,
-                          ),
-                        ],
-                      ),
+                        ),
+                      ],
                     ),
-                  );
-                },
-              ),
+                  ),
+                );
+              },
             ),
           ),
         ],
         if (searchFailed || searchEmpty) ...[
           const SizedBox(height: 8),
-          Row(
-            children: [
-              Icon(
-                searchFailed
-                    ? Icons.cloud_off_rounded
-                    : Icons.search_off_rounded,
-                color: AppColors.textFaint,
-                size: 15,
-              ),
-              const SizedBox(width: 7),
-              Expanded(
-                child: Text(
-                  searchFailed
-                      ? 'Search is unavailable right now. Drag the map to the spot instead.'
-                      : 'No places found. Try a city name, or drag the map.',
-                  style: theme.bodySmall,
-                ),
-              ),
-            ],
+          Text(
+            searchFailed
+                ? 'Search is unavailable right now. Drag the map to place the pin.'
+                : 'No places found. Drag the map to place the pin.',
+            style: theme.bodySmall,
           ),
         ],
         const SizedBox(height: 12),
         ClipRRect(
           borderRadius: BorderRadius.circular(22),
           child: SizedBox(
-            height: 322,
+            height: 250,
             child: Stack(
               children: [
                 Positioned.fill(
@@ -1303,8 +1033,6 @@ class _LocationStep extends StatelessWidget {
                     ],
                   ),
                 ),
-                // The pin sits at the map centre; dragging the map moves the
-                // spot, which is far easier than hitting a small marker.
                 const Positioned.fill(
                   child: IgnorePointer(
                     child: Align(
@@ -1323,19 +1051,12 @@ class _LocationStep extends StatelessWidget {
                     semanticLabel: 'Use my location',
                     onTap: onUseMyLocation,
                     child: Container(
-                      height: 44,
-                      padding: const EdgeInsets.symmetric(horizontal: 14),
+                      height: 40,
+                      padding: const EdgeInsets.symmetric(horizontal: 12),
                       decoration: BoxDecoration(
                         color: const Color(0xF20F0F11),
                         borderRadius: BorderRadius.circular(999),
                         border: Border.all(color: const Color(0x33FFFFFF)),
-                        boxShadow: const [
-                          BoxShadow(
-                            color: Color(0x59000000),
-                            blurRadius: 12,
-                            offset: Offset(0, 4),
-                          ),
-                        ],
                       ),
                       child: Row(
                         mainAxisSize: MainAxisSize.min,
@@ -1343,13 +1064,14 @@ class _LocationStep extends StatelessWidget {
                           const Icon(
                             Icons.my_location_rounded,
                             color: AppColors.textPrimary,
-                            size: 17,
+                            size: 15,
                           ),
-                          const SizedBox(width: 7),
+                          const SizedBox(width: 6),
                           Text(
                             'My location',
                             style: theme.labelLarge?.copyWith(
                               color: AppColors.textPrimary,
+                              fontSize: 12.5,
                               fontWeight: FontWeight.w700,
                             ),
                           ),
@@ -1362,113 +1084,60 @@ class _LocationStep extends StatelessWidget {
             ),
           ),
         ),
-        const SizedBox(height: 12),
-        if (photoDetected)
-          Padding(
-            padding: const EdgeInsets.only(bottom: 10),
-            child: Row(
-              children: [
-                const Icon(
-                  Icons.location_on_rounded,
-                  color: AppColors.success,
-                  size: 16,
-                ),
-                const SizedBox(width: 7),
-                Expanded(
-                  child: Text(
-                    'Pin placed from your photo’s GPS data. Drag the map to adjust.',
-                    style: theme.bodySmall?.copyWith(
-                      color: AppColors.success,
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
+        const SizedBox(height: 10),
         Container(
-          padding: const EdgeInsets.all(14),
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
           decoration: BoxDecoration(
             color: AppColors.surface,
-            borderRadius: BorderRadius.circular(16),
+            borderRadius: BorderRadius.circular(14),
             border: Border.all(color: AppColors.hairline),
           ),
           child: Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Padding(
-                padding: const EdgeInsets.only(top: 1),
-                child: Icon(
-                  resolving
-                      ? Icons.sync_rounded
-                      : Icons.place_rounded,
-                  color: resolving ? AppColors.textFaint : AppColors.accent,
-                  size: 19,
-                ),
+              Icon(
+                resolving ? Icons.sync_rounded : Icons.place_rounded,
+                color: resolving ? AppColors.textFaint : AppColors.accent,
+                size: 18,
               ),
-              const SizedBox(width: 11),
+              const SizedBox(width: 10),
               Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      resolving
-                          ? 'Finding the address…'
-                          : address.isEmpty
-                              ? 'Drag the map to place the pin'
-                              : address,
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                      style: theme.bodySmall?.copyWith(
-                        color: AppColors.textPrimary,
-                        fontSize: 13,
-                      ),
-                    ),
-                    const SizedBox(height: 3),
-                    Text(
-                      '${pinned.latitude.toStringAsFixed(5)}, '
-                      '${pinned.longitude.toStringAsFixed(5)}',
-                      style: theme.bodySmall?.copyWith(
-                        color: AppColors.textFaint,
-                        fontSize: 11.5,
-                      ),
-                    ),
-                  ],
+                child: Text(
+                  resolving
+                      ? 'Finding the address…'
+                      : address.isEmpty
+                          ? '${pinned.latitude.toStringAsFixed(5)}, '
+                              '${pinned.longitude.toStringAsFixed(5)}'
+                          : address,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.bodySmall?.copyWith(color: AppColors.textPrimary),
                 ),
               ),
             ],
           ),
         ),
-        if (cityEditable) ...[
-          const SizedBox(height: 14),
-          TextField(
-            onChanged: onCityChanged,
-            textCapitalization: TextCapitalization.words,
-            decoration: const InputDecoration(
-              labelText: 'City',
-              hintText: 'Enter the nearest city',
+        const SizedBox(height: 16),
+        SpotDetailsForm(
+          controller: draft,
+          initialName: draft.name,
+          initialCity: draft.city,
+          cityEditable: cityEditable,
+          submitting: submitting,
+          onPublish: onPublish,
+        ),
+        const SizedBox(height: 10),
+        Center(
+          child: TextButton(
+            onPressed: () => Navigator.of(context).push(
+              AppMotion.slideUp(const LegalScreen(doc: LegalDoc.guidelines)),
+            ),
+            child: const Text(
+              'By publishing you agree to our Community Guidelines',
+              style: TextStyle(color: AppColors.textFaint, fontSize: 11.5),
             ),
           ),
-          const SizedBox(height: 6),
-          Text(
-            'Address lookup failed — type the city yourself.',
-            style: theme.bodySmall?.copyWith(color: AppColors.danger),
-          ),
-        ] else if (city.isNotEmpty) ...[
-          const SizedBox(height: 10),
-          Row(
-            children: [
-              const Icon(
-                Icons.location_city_rounded,
-                color: AppColors.textFaint,
-                size: 14,
-              ),
-              const SizedBox(width: 6),
-              Text('City: $city', style: theme.bodySmall),
-            ],
-          ),
-        ],
+        ),
       ],
     );
   }
 }
-

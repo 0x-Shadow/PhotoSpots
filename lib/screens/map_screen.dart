@@ -1,3 +1,6 @@
+import 'dart:async';
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
@@ -15,11 +18,12 @@ import '../utils/actions.dart';
 import '../utils/categories.dart';
 import '../utils/format.dart';
 import '../utils/navigation.dart';
+import '../utils/ranking.dart';
 import '../utils/share.dart';
 import '../widgets/map_pin.dart';
 import '../widgets/spot_image.dart';
 
-enum _MapSort { nearest, topRated, saved }
+enum _MapSort { recommended, nearest, topRated, saved }
 
 /// Map screen — category pins, filters, sorting, and a floating spot card.
 class MapScreen extends StatefulWidget {
@@ -42,17 +46,31 @@ class _MapScreenState extends State<MapScreen> {
   /// Category id from [spotFilters]; null means every category.
   String? _filterCategoryId;
   String _query = '';
-  _MapSort _sort = _MapSort.nearest;
+  _MapSort _sort = _MapSort.recommended;
+  bool _sortInitialized = false;
   bool _mapReady = false;
   LatLng? _lastCenteredLocation;
   DateTime? _lastMarkerTap;
 
-  /// Marker culling. Every pin is a widget tree plus an image decode, so only
-  /// the pins inside a padded viewport are built. The buffer is deliberately
-  /// larger than the screen so panning does not rebuild on every frame; it is
-  /// only recomputed once the camera leaves the buffered area.
+  /// Marker culling & throttling. Rebuilding pins on every pinch-zoom frame
+  /// causes lag when zooming in and out, so camera updates are coalesced via
+  /// [_cameraThrottle] and settled cleanly when the gesture ends.
   LatLngBounds? _bufferedBounds;
+  double _zoom = 12.5;
   bool _showPhotoPins = true;
+  Timer? _cameraThrottle;
+  MapCamera? _latestCamera;
+  LatLng? _lastGeoFetchCenter;
+
+  /// Memoized filtered+sorted list so pan/zoom frames never recompute Haversine
+  /// distances over the entire catalog.
+  List<Spot>? _memoSpots;
+  String? _memoFilter;
+  String? _memoQuery;
+  _MapSort? _memoSort;
+  LatLng? _memoOrigin;
+  bool? _memoPersonalize;
+  List<Spot> _memoResult = const [];
 
   /// The basemap actually rendered: the preferred style unless the probe
   /// found it unusable and the session fell back.
@@ -92,7 +110,17 @@ class _MapScreenState extends State<MapScreen> {
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    final preferred = context.watch<SettingsState>().activeMapStyle;
+    final settings = context.watch<SettingsState>();
+    if (!_sortInitialized && settings.loaded) {
+      _sortInitialized = true;
+      _sort = switch (settings.defaultMapSort) {
+        'nearest' => _MapSort.nearest,
+        'top_rated' => _MapSort.topRated,
+        'saved' => _MapSort.saved,
+        _ => _MapSort.recommended,
+      };
+    }
+    final preferred = settings.activeMapStyle;
     if (_preferredUrl == null || preferred.urlTemplate != _preferredUrl) {
       _preferredUrl = preferred.urlTemplate;
       _activeStyle = preferred;
@@ -153,32 +181,69 @@ class _MapScreenState extends State<MapScreen> {
 
   /// The selected spot, but only while it is visible under the active filter
   /// and search query.
-  /// Rebuilds the marker set only when the camera leaves the buffered area,
-  /// not on every pan frame. Photo pins also drop out when zoomed far out,
-  /// where the thumbnail is too small to read anyway.
+  /// Coalesces camera updates so pinch-zooming in/out never triggers 60fps
+  /// marker rebuilds. Culling & zoom-level thresholds update at most ~7 times
+  /// per second while moving, plus immediately once the gesture finishes.
   void _onCameraChanged(MapCamera camera) {
     if (!_mapReady) return;
-    final buffered = _bufferedBounds;
-    if (buffered != null && buffered.containsBounds(camera.visibleBounds)) {
-      final photos = _photosAreUseful(camera.zoom);
-      if (photos != _showPhotoPins) {
-        setState(() => _showPhotoPins = photos);
+    _latestCamera = camera;
+    if (_cameraThrottle?.isActive ?? false) return;
+    _cameraThrottle = Timer(const Duration(milliseconds: 140), () {
+      if (mounted && _latestCamera != null) {
+        _applyCameraState(_latestCamera!);
       }
-      return;
-    }
-    setState(() {
-      _bufferedBounds = _buffered(camera.visibleBounds);
-      _showPhotoPins = _photosAreUseful(camera.zoom);
     });
   }
 
-  static bool _photosAreUseful(double zoom) => zoom >= 11;
+  void _onMapEvent(MapEvent event) {
+    if (!_mapReady) return;
+    if (event is MapEventMoveEnd ||
+        event is MapEventFlingAnimationEnd ||
+        event is MapEventDoubleTapZoomEnd) {
+      _cameraThrottle?.cancel();
+      _applyCameraState(event.camera);
+      _maybeFetchNearby(event.camera.center);
+    }
+  }
 
-  /// Pads the viewport by a third in each direction so a normal pan stays
-  /// inside the already-built marker set.
+  void _maybeFetchNearby(LatLng center) {
+    const distance = Distance();
+    final prev = _lastGeoFetchCenter;
+    if (prev != null &&
+        distance.as(LengthUnit.Kilometer, prev, center) < 25) {
+      return;
+    }
+    _lastGeoFetchCenter = center;
+    context.read<AppState>().loadNearbySpots(center);
+  }
+
+  void _applyCameraState(MapCamera camera) {
+    final photos = _photosAreUseful(camera.zoom);
+    final zoomChangedCluster =
+        (camera.zoom < 12.2) != (_zoom < 12.2) ||
+        (camera.zoom - _zoom).abs() >= 0.8;
+    final buffered = _bufferedBounds;
+    final outsideBuffer =
+        buffered == null || !buffered.containsBounds(camera.visibleBounds);
+    if (!outsideBuffer && photos == _showPhotoPins && !zoomChangedCluster) {
+      return;
+    }
+    setState(() {
+      if (outsideBuffer) {
+        _bufferedBounds = _buffered(camera.visibleBounds);
+      }
+      _zoom = camera.zoom;
+      _showPhotoPins = photos;
+    });
+  }
+
+  static bool _photosAreUseful(double zoom) => zoom >= 11.5;
+
+  /// Pads the viewport generously so panning or minor zooming stays inside
+  /// the already-built marker set without triggering setState.
   static LatLngBounds _buffered(LatLngBounds bounds) {
-    final latPad = (bounds.north - bounds.south) * 0.35;
-    final lngPad = (bounds.east - bounds.west) * 0.35;
+    final latPad = (bounds.north - bounds.south) * 0.6;
+    final lngPad = (bounds.east - bounds.west) * 0.6;
     return LatLngBounds(
       LatLng(
         (bounds.south - latPad).clamp(-85.0, 85.0),
@@ -189,6 +254,56 @@ class _MapScreenState extends State<MapScreen> {
         (bounds.east + lngPad).clamp(-180.0, 180.0),
       ),
     );
+  }
+
+  /// Groups nearby pins into lightweight clusters when zoomed far out.
+  ({List<Spot> singles, List<_SpotCluster> clusters}) _clusterOrPins(
+    List<Spot> visible, {
+    required bool enableClustering,
+  }) {
+    if (!enableClustering || _zoom >= 12.2 || visible.length <= 16) {
+      return (singles: visible, clusters: const []);
+    }
+
+    final cellDeg = 0.035 * math.pow(2, (12.0 - _zoom).clamp(0.0, 7.0));
+    final buckets = <String, List<Spot>>{};
+    for (final spot in visible) {
+      if (spot.id == _selectedId) continue;
+      final gx = (spot.location.longitude / cellDeg).floor();
+      final gy = (spot.location.latitude / cellDeg).floor();
+      final key = '$gx:$gy';
+      (buckets[key] ??= []).add(spot);
+    }
+
+    final singles = <Spot>[];
+    final clusters = <_SpotCluster>[];
+    for (final group in buckets.values) {
+      if (group.length == 1) {
+        singles.add(group.first);
+      } else {
+        var latSum = 0.0;
+        var lngSum = 0.0;
+        for (final s in group) {
+          latSum += s.location.latitude;
+          lngSum += s.location.longitude;
+        }
+        clusters.add(
+          _SpotCluster(
+            center: LatLng(latSum / group.length, lngSum / group.length),
+            spots: group,
+          ),
+        );
+      }
+    }
+    if (_selectedId != null) {
+      for (final s in visible) {
+        if (s.id == _selectedId) {
+          singles.add(s);
+          break;
+        }
+      }
+    }
+    return (singles: singles, clusters: clusters);
   }
 
   /// The subset of [spots] whose pins are worth building right now. The
@@ -229,6 +344,7 @@ class _MapScreenState extends State<MapScreen> {
 
   @override
   void dispose() {
+    _cameraThrottle?.cancel();
     MapScreen.focusRequest.removeListener(_onFocusRequested);
     _searchController.dispose();
     _mapController.dispose();
@@ -236,7 +352,19 @@ class _MapScreenState extends State<MapScreen> {
   }
 
   List<Spot> _visible(AppState state) {
-    var list = spotsForFilter(state.spots, _filterCategoryId).where((spot) {
+    final rawSpots = state.spots;
+    final origin = state.referenceLocation;
+    final personalize = state.personalizeFeed;
+    if (identical(_memoSpots, rawSpots) &&
+        _memoFilter == _filterCategoryId &&
+        _memoQuery == _query &&
+        _memoSort == _sort &&
+        _memoOrigin == origin &&
+        _memoPersonalize == personalize) {
+      return _memoResult;
+    }
+
+    var list = spotsForFilter(rawSpots, _filterCategoryId).where((spot) {
       final query = _query.trim().toLowerCase();
       if (query.isEmpty) return true;
       return spot.title.toLowerCase().contains(query) ||
@@ -244,8 +372,14 @@ class _MapScreenState extends State<MapScreen> {
           spot.tags.any((tag) => tag.toLowerCase().contains(query));
     }).toList();
 
-    final origin = state.referenceLocation;
     switch (_sort) {
+      case _MapSort.recommended:
+        list = SpotRanking.recommend(
+          list,
+          state.interestProfile,
+          userLocation: state.hasReferenceFix ? origin : null,
+          diversify: false,
+        );
       case _MapSort.nearest:
         list.sort(
           (a, b) => state
@@ -257,6 +391,14 @@ class _MapScreenState extends State<MapScreen> {
       case _MapSort.saved:
         list.sort((a, b) => b.saveCount.compareTo(a.saveCount));
     }
+
+    _memoSpots = rawSpots;
+    _memoFilter = _filterCategoryId;
+    _memoQuery = _query;
+    _memoSort = _sort;
+    _memoOrigin = origin;
+    _memoPersonalize = personalize;
+    _memoResult = list;
     return list;
   }
 
@@ -319,6 +461,11 @@ class _MapScreenState extends State<MapScreen> {
                   ),
                 ),
               ),
+              option(
+                _MapSort.recommended,
+                Icons.auto_awesome_rounded,
+                'Recommended for you',
+              ),
               option(_MapSort.nearest, Icons.near_me_rounded, 'Nearest'),
               option(
                 _MapSort.topRated,
@@ -347,7 +494,11 @@ class _MapScreenState extends State<MapScreen> {
     final state = context.watch<AppState>();
     final settings = context.watch<SettingsState>();
     final allSpots = _visible(state);
-    final spots = _visibleInViewport(allSpots);
+    final viewportSpots = _visibleInViewport(allSpots);
+    final grouped = _clusterOrPins(
+      viewportSpots,
+      enableClustering: settings.clusterMapPins,
+    );
     final selected = _selectedIn(allSpots);
     final origin = state.referenceLocation;
     _centerOnUserOnce(state);
@@ -373,10 +524,12 @@ class _MapScreenState extends State<MapScreen> {
                     InteractiveFlag.flingAnimation,
               ),
               onPositionChanged: (camera, _) => _onCameraChanged(camera),
+              onMapEvent: _onMapEvent,
               onMapReady: () {
                 final camera = _mapController.camera;
                 setState(() {
                   _mapReady = true;
+                  _zoom = camera.zoom;
                   _bufferedBounds = _buffered(camera.visibleBounds);
                   _showPhotoPins = _photosAreUseful(camera.zoom);
                 });
@@ -412,32 +565,44 @@ class _MapScreenState extends State<MapScreen> {
                 style: _activeStyle,
                 onFallback: _onFallback,
               ),
-              MarkerLayer(
-                markers: [
-                  if (state.userLocation != null)
-                    Marker(
-                      point: origin,
-                      width: 34,
-                      height: 34,
-                      child: const PulsingLocationDot(),
-                    ),
-                  // Unselected pins first, then the selected one, so the active
-                  // pin is never buried under a neighbour.
-                  for (final spot in spots)
-                    if (spot.id != _selectedId)
-                      _spotMarker(
-                        spot: spot,
-                        selected: false,
-                        showPhoto: settings.mapPhotoPins && _showPhotoPins,
+              RepaintBoundary(
+                child: MarkerLayer(
+                  markers: [
+                    if (state.userLocation != null)
+                      Marker(
+                        point: origin,
+                        width: 34,
+                        height: 34,
+                        child: const PulsingLocationDot(),
                       ),
-                  for (final spot in spots)
-                    if (spot.id == _selectedId)
-                      _spotMarker(
-                        spot: spot,
-                        selected: true,
-                        showPhoto: settings.mapPhotoPins,
+                    for (final cluster in grouped.clusters)
+                      Marker(
+                        point: cluster.center,
+                        width: 44,
+                        height: 44,
+                        child: GestureDetector(
+                          onTap: () => _fitSpots(cluster.spots),
+                          child: SpotClusterPin(count: cluster.spots.length),
+                        ),
                       ),
-                ],
+                    // Unselected pins first, then the selected one, so the active
+                    // pin is never buried under a neighbour.
+                    for (final spot in grouped.singles)
+                      if (spot.id != _selectedId)
+                        _spotMarker(
+                          spot: spot,
+                          selected: false,
+                          showPhoto: settings.mapPhotoPins && _showPhotoPins,
+                        ),
+                    for (final spot in grouped.singles)
+                      if (spot.id == _selectedId)
+                        _spotMarker(
+                          spot: spot,
+                          selected: true,
+                          showPhoto: settings.mapPhotoPins,
+                        ),
+                  ],
+                ),
               ),
               MapAttribution(style: _activeStyle),
             ],
@@ -1107,4 +1272,11 @@ class _PlaceCard extends StatelessWidget {
       ),
     );
   }
+}
+
+class _SpotCluster {
+  const _SpotCluster({required this.center, required this.spots});
+
+  final LatLng center;
+  final List<Spot> spots;
 }

@@ -67,14 +67,16 @@ class GeocodingService {
     String query, {
     int limit = 5,
   }) async {
-    final trimmed = query.trim();
+    var trimmed = query.trim();
     if (trimmed.isEmpty) return PlaceSearchResult.empty;
+    if (trimmed.length > 120) trimmed = trimmed.substring(0, 120);
+    final safeLimit = limit.clamp(1, 15);
 
     final owned = client ?? http.Client();
     var errored = false;
     try {
       try {
-        final photon = await _searchPhoton(owned, trimmed, limit);
+        final photon = await _searchPhoton(owned, trimmed, safeLimit);
         if (photon.isNotEmpty) {
           return PlaceSearchResult(results: photon, failed: false);
         }
@@ -83,7 +85,7 @@ class GeocodingService {
       }
 
       try {
-        final nominatim = await _searchNominatim(owned, trimmed, limit);
+        final nominatim = await _searchNominatim(owned, trimmed, safeLimit);
         if (nominatim.isNotEmpty) {
           return PlaceSearchResult(results: nominatim, failed: false);
         }
@@ -128,7 +130,7 @@ class GeocodingService {
       if (pair.length < 2) continue;
       final lng = _number(pair[0]);
       final lat = _number(pair[1]);
-      if (lng == null || lat == null) continue;
+      if (lat == null || lng == null || !_validCoords(lat, lng)) continue;
 
       final props = feature['properties'];
       final properties = props is Map<String, dynamic> ? props : {};
@@ -167,7 +169,9 @@ class GeocodingService {
     final response = await owned
         .get(uri, headers: const {'User-Agent': _userAgent})
         .timeout(const Duration(seconds: 6));
-    if (response.statusCode != 200) return const [];
+    if (response.statusCode != 200) {
+      throw StateError('Nominatim returned HTTP ${response.statusCode}');
+    }
     final data = jsonDecode(response.body);
     if (data is! List) return const [];
 
@@ -176,7 +180,7 @@ class GeocodingService {
       if (item is! Map<String, dynamic>) continue;
       final lat = _number(item['lat']);
       final lng = _number(item['lon']);
-      if (lat == null || lng == null) continue;
+      if (lat == null || lng == null || !_validCoords(lat, lng)) continue;
       final address = item['address'];
       final fields = address is Map
           ? Map<String, dynamic>.from(address)
@@ -285,6 +289,16 @@ class GeocodingService {
 
   static String _text(Object? value) =>
       value is String ? value.trim() : value?.toString().trim() ?? '';
+
+  static bool _validCoords(double? lat, double? lng) =>
+      lat != null &&
+      lng != null &&
+      lat.isFinite &&
+      lng.isFinite &&
+      lat >= -90 &&
+      lat <= 90 &&
+      lng >= -180 &&
+      lng <= 180;
 
   static double? _number(Object? value) => switch (value) {
         num() => value.toDouble(),

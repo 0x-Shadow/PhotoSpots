@@ -22,7 +22,7 @@ class HomeScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final state = context.watch<AppState>();
-    final ranked = state.rankedSpots;
+    final ranked = state.recommendedSpots;
     final spotlight = ranked.isNotEmpty ? ranked.first : null;
 
     final golden = ranked.where(

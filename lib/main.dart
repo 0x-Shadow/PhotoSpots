@@ -52,13 +52,21 @@ class _PhotoSpotAppState extends State<PhotoSpotApp> {
     return MultiProvider(
       providers: [
         ChangeNotifierProvider(
-          create: (_) => AppState(_repository)..load(),
-        ),
-        ChangeNotifierProvider(
           create: (_) => SettingsState()..load(),
         ),
         ChangeNotifierProvider(
           create: (_) => AuthState()..load(),
+        ),
+        ChangeNotifierProxyProvider2<AuthState, SettingsState, AppState>(
+          create: (_) => AppState(_repository)..load(),
+          update: (_, auth, settings, app) {
+            final state = app ?? (AppState(_repository)..load());
+            state.syncContext(
+              activeUserId: auth.activeUserId,
+              personalizeFeed: settings.personalizeFeed,
+            );
+            return state;
+          },
         ),
       ],
       child: _LocationResumeObserver(

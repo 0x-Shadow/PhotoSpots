@@ -24,6 +24,11 @@ void main() {
   testWidgets('detail shows a mini map, sticky share and honest facts', (
     tester,
   ) async {
+    tester.view.physicalSize = const Size(360, 780);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
     await pumpDetail(tester);
 
     expect(find.byType(FlutterMap), findsOneWidget);

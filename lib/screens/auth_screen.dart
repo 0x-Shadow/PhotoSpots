@@ -81,6 +81,43 @@ class _AuthScreenState extends State<AuthScreen> {
     _formKey.currentState?.reset();
   }
 
+  Future<void> _resetPassword() async {
+    final controller = TextEditingController(text: _email.text.trim());
+    final submitted = await showDialog<String?>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Reset password'),
+        content: TextField(
+          controller: controller,
+          keyboardType: TextInputType.emailAddress,
+          autofocus: true,
+          decoration: const InputDecoration(
+            labelText: 'Account email',
+            hintText: 'you@example.com',
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () =>
+                Navigator.of(dialogContext).pop(controller.text.trim()),
+            child: const Text('Send link'),
+          ),
+        ],
+      ),
+    );
+    controller.dispose();
+    if (submitted == null || !mounted) return;
+    final res = await context.read<AuthState>().sendPasswordReset(submitted);
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(res.message ?? 'Check your inbox.')),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final auth = context.watch<AuthState>();
@@ -293,6 +330,18 @@ class _AuthScreenState extends State<AuthScreen> {
                 ),
               ),
               const SizedBox(height: 12),
+              if (!_signUp && AuthState.supportsAccounts)
+                Align(
+                  alignment: Alignment.centerRight,
+                  child: TextButton(
+                    onPressed: auth.busy ? null : _resetPassword,
+                    style: TextButton.styleFrom(
+                      foregroundColor: AppColors.textSecondary,
+                      visualDensity: VisualDensity.compact,
+                    ),
+                    child: const Text('Forgot password?'),
+                  ),
+                ),
               Center(
                 child: TextButton(
                   onPressed: auth.busy ? null : _switchMode,

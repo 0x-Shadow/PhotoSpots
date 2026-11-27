@@ -14,8 +14,6 @@
     <uses-permission
         android:name="android.permission.WRITE_EXTERNAL_STORAGE"
         android:maxSdkVersion="29" />
-    <!-- Lets the in-app updater hand a downloaded release to the package installer. -->
-    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
     <application
         android:label="PhotoSpot"
         android:name="${applicationName}"

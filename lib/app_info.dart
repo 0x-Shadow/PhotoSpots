@@ -11,7 +11,7 @@ class AppInfo {
   /// it in sync, otherwise the checked-in value is used.
   static const version = String.fromEnvironment(
     'APP_VERSION',
-    defaultValue: '1.0.11',
+    defaultValue: '1.0.15',
   );
 
   static const githubRepo = '0x-Shadow/PhotoSpots';
@@ -48,4 +48,28 @@ class AppInfo {
       : Uri.parse('https://github.com/$githubRepo/releases/latest');
 
   static Uri get repoPage => Uri.parse('https://github.com/$githubRepo');
+
+  /// Support contact shown in Legal & Support screens (Google Play policy).
+  static const supportEmail = String.fromEnvironment(
+    'SUPPORT_EMAIL',
+    defaultValue: 'support@photospot.app',
+  );
+
+  /// Optional external legal URLs; in-app legal pages always work offline too.
+  static const privacyPolicyUrl = String.fromEnvironment(
+    'PRIVACY_POLICY_URL',
+    defaultValue: '',
+  );
+  static const termsUrl = String.fromEnvironment(
+    'TERMS_URL',
+    defaultValue: '',
+  );
+
+  /// Sideload APK self-install is disabled by default for Google Play
+  /// compliance (Play forbids `REQUEST_INSTALL_PACKAGES`). Set
+  /// `--dart-define=ENABLE_SELF_UPDATE=true` only for direct GitHub APK builds.
+  static const enableSelfUpdate = bool.fromEnvironment(
+    'ENABLE_SELF_UPDATE',
+    defaultValue: false,
+  );
 }

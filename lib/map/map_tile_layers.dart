@@ -78,6 +78,9 @@ class MapTileLayersState extends State<MapTileLayers> {
       userAgentPackageName: 'com.photospot.app',
       maxZoom: _style.maxZoom.toDouble(),
       retinaMode: retina,
+      panBuffer: 1,
+      keepBuffer: 2,
+      evictErrorTileStrategy: EvictErrorTileStrategy.dispose,
     );
     final referenceUrl = _style.referenceUrlTemplate;
 
@@ -93,6 +96,9 @@ class MapTileLayersState extends State<MapTileLayers> {
               userAgentPackageName: 'com.photospot.app',
               maxZoom: _style.maxZoom.toDouble(),
               retinaMode: retina,
+              panBuffer: 1,
+              keepBuffer: 2,
+              evictErrorTileStrategy: EvictErrorTileStrategy.dispose,
             ),
         ],
       ),

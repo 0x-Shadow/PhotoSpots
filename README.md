@@ -96,11 +96,8 @@ flutter run \
 Set up the project before inviting real contributors:
 
 1. Create a Supabase project.
-2. Run, in order, [`supabase_schema.sql`](supabase_schema.sql),
-   [`supabase_engagement.sql`](supabase_engagement.sql), and
-   [`supabase_fix.sql`](supabase_fix.sql) in the SQL editor. All three are
-   idempotent and can be re-run; each states its hardened policies inline, so a
-   re-run cannot reopen what a later script closed.
+2. Paste [`supabase_setup.sql`](supabase_setup.sql) into the SQL editor and run
+   it. It is completely idempotent and can be re-run safely at any time.
 3. Enable **Anonymous sign-ins** under Authentication → Providers.
 4. Create a public storage bucket named `photos`.
 5. Confirm your Row Level Security policies before production. The included
@@ -136,7 +133,8 @@ points at your long-lived Android signing key, then run:
 
 ```bash
 flutter build apk --release \
-  --dart-define=APP_VERSION=1.0.11 \
+  --dart-define=APP_VERSION=1.0.15 \
+  --dart-define=ENABLE_SELF_UPDATE=true \
   --dart-define=SUPABASE_URL=https://YOUR-PROJECT.supabase.co \
   --dart-define=SUPABASE_ANON_KEY=YOUR-PUBLISHABLE-ANON-KEY
 ```
@@ -199,14 +197,10 @@ lib/
   state/      app, auth, settings, and location state
   theme/      visual tokens and motion
   widgets/    reusable cards, pins, forms, and state views
-supabase_schema.sql       tables, RLS, storage, counters, seed data
-supabase_engagement.sql   likes, comments, and counter triggers
-supabase_fix.sql          de-duplication and storage policy repair
+supabase_setup.sql        complete schema, RLS, storage, triggers, and seed data
 .github/workflows/        CI gate and signed APK release automation
 ```
 
 ## License
 
-Choose and add an open-source license before accepting outside contributions.
-MIT is a simple permissive default; Apache-2.0 is another strong option when
-you want an explicit patent grant.
+Released under the [MIT License](LICENSE).

@@ -21,7 +21,14 @@ void main() {
     await tester.pumpWidget(_app());
     await tester.pump();
 
-    await tester.tap(find.text('Street'));
+    final street = find.text('Street');
+    await tester.scrollUntilVisible(
+      street,
+      240,
+      scrollable: find.byType(Scrollable).first,
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(street);
     await tester.pumpAndSettle();
 
     final prefs = await SharedPreferences.getInstance();
@@ -34,7 +41,14 @@ void main() {
     await tester.pumpWidget(_app());
     await tester.pump();
 
-    await tester.tap(find.text('CARTO dark'));
+    final carto = find.text('CARTO dark');
+    await tester.scrollUntilVisible(
+      carto,
+      240,
+      scrollable: find.byType(Scrollable).first,
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(carto);
     await tester.pumpAndSettle();
 
     expect(
@@ -43,6 +57,31 @@ void main() {
     );
     final prefs = await SharedPreferences.getInstance();
     expect(prefs.getString(SettingsState.mapStyleKey), isNull);
+  });
+
+  testWidgets('settings exposes edit profile, legal docs, and algorithm toggles', (
+    tester,
+  ) async {
+    await tester.pumpWidget(_app());
+    await tester.pump();
+
+    await tester.tap(find.text('Edit profile'));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('profile_name')), findsOneWidget);
+    Navigator.of(tester.element(find.byKey(const ValueKey('profile_name'))))
+        .pop();
+    await tester.pumpAndSettle();
+
+    final privacy = find.text('Privacy Policy');
+    await tester.scrollUntilVisible(
+      privacy,
+      280,
+      scrollable: find.byType(Scrollable).first,
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(privacy);
+    await tester.pumpAndSettle();
+    expect(find.text('How PhotoSpot handles your data'), findsOneWidget);
   });
 
   testWidgets('profile reaches settings and has no Preferences sheet', (

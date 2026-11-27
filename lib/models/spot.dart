@@ -42,6 +42,10 @@ class Spot {
     this.commentCount = 0,
     this.createdAt,
     this.submittedBy,
+    this.submittedById,
+    this.focalLength,
+    this.tripodFriendly,
+    this.accessNote,
   });
 
   final String id;
@@ -54,6 +58,11 @@ class Spot {
   /// Human hint like "Golden hour" / "Blue hour" / "Night".
   final String? bestTime;
 
+  /// Optional camera/access specs.
+  final String? focalLength;
+  final bool? tripodFriendly;
+  final String? accessNote;
+
   /// Community rating shown as ★ 4.9 (seed data until reviews ship).
   final double rating;
   final int reviewCount;
@@ -63,7 +72,12 @@ class Spot {
   final int likeCount;
   final int commentCount;
   final DateTime? createdAt;
+
+  /// Author display name shown on cards/details.
   final String? submittedBy;
+
+  /// Author user id (`auth.uid()` in Supabase or `'you'` in demo mode).
+  final String? submittedById;
 
   /// Cover photo, with a stable placeholder for photo-less spots.
   SpotPhoto get coverPhoto => photos.isNotEmpty
@@ -86,14 +100,25 @@ class Spot {
   /// Quality (rating) and freshness keep a brand-new spot visible.
   int get engagementCount => saveCount + likeCount + commentCount + viewCount;
 
-  /// Algorithmic ranking score. Weights are documented on [engagementCount].
-  double get score {
+  /// Algorithmic ranking score evaluated at [now] so callers sorting a full
+  /// list use one consistent timestamp.
+  ///
+  /// Combines deliberate engagement (saves, likes, comments), capped views,
+  /// Bayesian-smoothed rating confidence, and 30-day freshness decay.
+  double scoreAt(DateTime now) {
     final age = createdAt == null
         ? const Duration(days: 999).inDays
-        : DateTime.now().difference(createdAt!).inDays;
+        : now.difference(createdAt!).inDays.clamp(0, 999);
     final freshness = age >= 30 ? 0.0 : 40.0 * (1 - age / 30);
     final viewBoost = (viewCount * 0.05).clamp(0.0, 40.0);
-    final quality = rating * 6;
+    // Bayesian smoothing prevents a 1-review 5.0 spot from beating a heavily
+    // reviewed 4.9 landmark while still letting unreviewed new spots compete.
+    const priorWeight = 10.0;
+    const priorMean = 4.3;
+    final bayesianRating =
+        (rating * reviewCount + priorMean * priorWeight) /
+        (reviewCount + priorWeight);
+    final quality = bayesianRating * 6;
     return saveCount * 3 +
         likeCount * 2 +
         commentCount * 2.5 +
@@ -101,6 +126,9 @@ class Spot {
         quality +
         freshness;
   }
+
+  /// Algorithmic ranking score. Weights are documented on [engagementCount].
+  double get score => scoreAt(DateTime.now());
 
   Spot copyWith({
     String? title,
@@ -116,6 +144,11 @@ class Spot {
     double? rating,
     int? reviewCount,
     List<SpotPhoto>? photos,
+    String? submittedBy,
+    String? submittedById,
+    String? focalLength,
+    bool? tripodFriendly,
+    String? accessNote,
   }) {
     return Spot(
       id: id,
@@ -133,7 +166,88 @@ class Spot {
       likeCount: likeCount ?? this.likeCount,
       commentCount: commentCount ?? this.commentCount,
       createdAt: createdAt,
-      submittedBy: submittedBy,
+      submittedBy: submittedBy ?? this.submittedBy,
+      submittedById: submittedById ?? this.submittedById,
+      focalLength: focalLength ?? this.focalLength,
+      tripodFriendly: tripodFriendly ?? this.tripodFriendly,
+      accessNote: accessNote ?? this.accessNote,
+    );
+  }
+
+  /// Compact JSON serialization for offline Saved Spots caching.
+  Map<String, dynamic> toCacheJson() => {
+        'id': id,
+        'title': title,
+        'lat': location.latitude,
+        'lng': location.longitude,
+        'description': description,
+        'city': city,
+        'tags': tags,
+        'bestTime': bestTime,
+        'rating': rating,
+        'reviewCount': reviewCount,
+        'saveCount': saveCount,
+        'viewCount': viewCount,
+        'likeCount': likeCount,
+        'commentCount': commentCount,
+        'createdAt': createdAt?.toIso8601String(),
+        'submittedBy': submittedBy,
+        'submittedById': submittedById,
+        'focalLength': focalLength,
+        'tripodFriendly': tripodFriendly,
+        'accessNote': accessNote,
+        'photos': photos
+            .map((p) => {
+                  'id': p.id,
+                  'url': p.url,
+                  'caption': p.caption,
+                  'uploadedBy': p.uploadedBy,
+                  'takenAt': p.takenAt?.toIso8601String(),
+                })
+            .toList(),
+      };
+
+  static Spot fromCacheJson(Map<String, dynamic> json) {
+    final rawPhotos = (json['photos'] as List?) ?? const [];
+    return Spot(
+      id: json['id']?.toString() ?? '',
+      title: json['title']?.toString() ?? '',
+      location: LatLng(
+        (json['lat'] as num?)?.toDouble() ?? 0,
+        (json['lng'] as num?)?.toDouble() ?? 0,
+      ),
+      description: json['description']?.toString() ?? '',
+      city: json['city']?.toString() ?? '',
+      tags: (json['tags'] as List? ?? const []).map((e) => '$e').toList(),
+      bestTime: json['bestTime'] as String?,
+      rating: (json['rating'] as num?)?.toDouble() ?? 4.5,
+      reviewCount: (json['reviewCount'] as num?)?.toInt() ?? 0,
+      saveCount: (json['saveCount'] as num?)?.toInt() ?? 0,
+      viewCount: (json['viewCount'] as num?)?.toInt() ?? 0,
+      likeCount: (json['likeCount'] as num?)?.toInt() ?? 0,
+      commentCount: (json['commentCount'] as num?)?.toInt() ?? 0,
+      createdAt: json['createdAt'] != null
+          ? DateTime.tryParse(json['createdAt'].toString())
+          : null,
+      submittedBy: json['submittedBy'] as String?,
+      submittedById: json['submittedById'] as String?,
+      focalLength: json['focalLength'] as String?,
+      tripodFriendly: json['tripodFriendly'] as bool?,
+      accessNote: json['accessNote'] as String?,
+      photos: rawPhotos
+          .map((e) => Map<String, dynamic>.from(e as Map))
+          .map(
+            (p) => SpotPhoto(
+              id: p['id']?.toString() ?? '',
+              url: p['url']?.toString() ?? '',
+              caption: p['caption'] as String?,
+              uploadedBy: p['uploadedBy'] as String?,
+              takenAt: p['takenAt'] != null
+                  ? DateTime.tryParse(p['takenAt'].toString())
+                  : null,
+            ),
+          )
+          .toList(),
     );
   }
 }

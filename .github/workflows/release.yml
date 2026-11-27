@@ -112,6 +112,7 @@ jobs:
             --build-name="$VERSION" \
             --build-number="$BUILD_NUMBER" \
             --dart-define=APP_VERSION="$VERSION" \
+            --dart-define=ENABLE_SELF_UPDATE=true \
             --dart-define=SUPABASE_URL="$SUPABASE_URL" \
             --dart-define=SUPABASE_ANON_KEY="$SUPABASE_ANON_KEY"
 

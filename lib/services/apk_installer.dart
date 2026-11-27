@@ -2,17 +2,20 @@ import 'dart:io';
 
 import 'package:flutter/services.dart';
 
+import '../app_info.dart';
+
 /// Thin bridge to the Android package installer.
 ///
-/// Android is the only platform where an app may install its own update, so on
-/// everything else [isSupported] is false and callers fall back to the release
-/// page.
+/// Disabled on Google Play builds ([AppInfo.enableSelfUpdate] is false by
+/// default) because Play rejects `REQUEST_INSTALL_PACKAGES`. Direct GitHub
+/// sideload builds can opt in via `--dart-define=ENABLE_SELF_UPDATE=true`.
 class ApkInstaller {
   ApkInstaller._();
 
   static const _channel = MethodChannel('photospot/updates');
 
-  static bool get isSupported => Platform.isAndroid;
+  static bool get isSupported =>
+      AppInfo.enableSelfUpdate && Platform.isAndroid;
 
   /// Whether the user has allowed PhotoSpot to install apps. Returns true on
   /// platforms without that restriction so callers need no special casing.

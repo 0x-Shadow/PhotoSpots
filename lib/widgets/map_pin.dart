@@ -56,40 +56,88 @@ class SpotPin extends StatelessWidget {
             size: head * 0.88,
           );
 
-    return SizedBox(
-      width: width,
-      height: height,
-      child: Stack(
-        clipBehavior: Clip.none,
-        children: [
-          Positioned.fill(
-            child: CustomPaint(
-              painter: _PinPainter(color: style.color, selected: selected),
+    return RepaintBoundary(
+      child: SizedBox(
+        width: width,
+        height: height,
+        child: Stack(
+          clipBehavior: Clip.none,
+          children: [
+            Positioned.fill(
+              child: CustomPaint(
+                painter: _PinPainter(color: style.color, selected: selected),
+              ),
             ),
-          ),
-          Positioned(
-            left: center.dx - head * 0.76,
-            top: center.dy - head * 0.76,
-            width: head * 1.52,
-            height: head * 1.52,
-            child: Center(child: glyph),
-          ),
-          if (selected)
             Positioned(
-              left: center.dx - head - 3,
-              top: center.dy - head - 3,
-              width: (head + 3) * 2,
-              height: (head + 3) * 2,
-              child: IgnorePointer(
-                child: DecoratedBox(
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    border: Border.all(color: const Color(0x59FFFFFF), width: 2),
+              left: center.dx - head * 0.76,
+              top: center.dy - head * 0.76,
+              width: head * 1.52,
+              height: head * 1.52,
+              child: Center(child: glyph),
+            ),
+            if (selected)
+              Positioned(
+                left: center.dx - head - 3,
+                top: center.dy - head - 3,
+                width: (head + 3) * 2,
+                height: (head + 3) * 2,
+                child: IgnorePointer(
+                  child: DecoratedBox(
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      border: Border.all(
+                        color: const Color(0x59FFFFFF),
+                        width: 2,
+                      ),
+                    ),
                   ),
                 ),
               ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Lightweight cluster badge used when zoomed out so dense regions stay crisp
+/// and pinch-zooming never stalls on hundreds of individual pins.
+class SpotClusterPin extends StatelessWidget {
+  const SpotClusterPin({super.key, required this.count});
+
+  final int count;
+
+  @override
+  Widget build(BuildContext context) {
+    return RepaintBoundary(
+      child: Container(
+        width: 42,
+        height: 42,
+        alignment: Alignment.center,
+        decoration: BoxDecoration(
+          shape: BoxShape.circle,
+          gradient: const LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: [AppColors.accent, Color(0xFF5B6BFF)],
+          ),
+          border: Border.all(color: Colors.white, width: 2.2),
+          boxShadow: const [
+            BoxShadow(
+              color: Color(0x88000000),
+              blurRadius: 10,
+              offset: Offset(0, 3),
             ),
-        ],
+          ],
+        ),
+        child: Text(
+          count > 99 ? '99+' : '$count',
+          style: const TextStyle(
+            color: Colors.white,
+            fontSize: 12.5,
+            fontWeight: FontWeight.w800,
+          ),
+        ),
       ),
     );
   }
