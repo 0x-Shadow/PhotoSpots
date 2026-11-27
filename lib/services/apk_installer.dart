@@ -34,6 +34,7 @@ class ApkInstaller {
   /// permission is already granted, so the caller can retry straight away.
   static Future<bool> requestInstallPermission() async {
     if (!isSupported) return false;
+    if (await canInstall()) return true;
     try {
       await _channel.invokeMethod<void>('openInstallSettings');
     } on PlatformException {
@@ -41,7 +42,7 @@ class ApkInstaller {
     } on MissingPluginException {
       return false;
     }
-    return canInstall();
+    return false;
   }
 
   /// Starts the system installer for [apkPath]. Returns false when the intent

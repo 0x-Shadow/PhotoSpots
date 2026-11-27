@@ -35,9 +35,7 @@ void main() {
     await pumpSheet(tester, phase: UpdatePhase.needsPermission);
 
     expect(
-      find.text(
-        'Allow PhotoSpot to install updates, then tap Update again.',
-      ),
+      find.textContaining('Allow from this source'),
       findsOneWidget,
     );
     expect(find.text('Install update'), findsOneWidget);

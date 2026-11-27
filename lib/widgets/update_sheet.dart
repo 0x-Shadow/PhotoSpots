@@ -121,7 +121,7 @@ class UpdateSheet extends StatefulWidget {
   State<UpdateSheet> createState() => _UpdateSheetState();
 }
 
-class _UpdateSheetState extends State<UpdateSheet> {
+class _UpdateSheetState extends State<UpdateSheet> with WidgetsBindingObserver {
   late UpdatePhase _phase;
   late int _received;
   int? _total;
@@ -132,9 +132,26 @@ class _UpdateSheetState extends State<UpdateSheet> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _phase = widget.initialPhase;
     _received = widget.initialReceived;
     _total = widget.initialTotal;
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed &&
+        _phase == UpdatePhase.needsPermission &&
+        _apkPath != null &&
+        mounted) {
+      _install();
+    }
   }
 
   bool get _selfUpdate =>
@@ -213,7 +230,10 @@ class _UpdateSheetState extends State<UpdateSheet> {
     final path = _apkPath;
     if (path == null) return;
 
-    setState(() => _phase = UpdatePhase.installing);
+    setState(() {
+      _phase = UpdatePhase.installing;
+      _error = null;
+    });
 
     if (!await ApkInstaller.canInstall()) {
       await ApkInstaller.requestInstallPermission();
@@ -229,6 +249,13 @@ class _UpdateSheetState extends State<UpdateSheet> {
 
     if (started) {
       Navigator.of(context).pop(UpdateAction.installStarted);
+      return;
+    }
+
+    if (!await ApkInstaller.canInstall()) {
+      await ApkInstaller.requestInstallPermission();
+      if (!mounted) return;
+      setState(() => _phase = UpdatePhase.needsPermission);
       return;
     }
 
@@ -364,7 +391,8 @@ class _UpdateSheetState extends State<UpdateSheet> {
                   if (_phase == UpdatePhase.needsPermission) ...[
                     const SizedBox(height: 12),
                     Text(
-                      'Allow PhotoSpot to install updates, then tap Update again.',
+                      'Tap "Allow from this source" in Settings, then return '
+                      'here — the update will resume automatically.',
                       style: theme.bodyMedium,
                     ),
                   ],

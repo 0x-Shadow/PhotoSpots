@@ -16,35 +16,55 @@ import java.io.File
  */
 class MainActivity : FlutterActivity() {
 
+    private var methodChannel: MethodChannel? = null
+
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
 
-        MethodChannel(
+        methodChannel = MethodChannel(
             flutterEngine.dartExecutor.binaryMessenger,
             "photospot/updates"
-        ).setMethodCallHandler { call, result ->
-            when (call.method) {
-                "canInstallPackages" -> result.success(canInstallPackages())
-                "openInstallSettings" -> {
-                    openInstallSettings()
-                    result.success(null)
-                }
-                "installApk" -> {
-                    val path = call.argument<String>("path")
-                    if (path.isNullOrEmpty()) {
-                        result.error("bad-arguments", "Missing APK path", null)
-                        return@setMethodCallHandler
+        ).also { channel ->
+            channel.setMethodCallHandler { call, result ->
+                when (call.method) {
+                    "canInstallPackages" -> result.success(canInstallPackages())
+                    "openInstallSettings" -> {
+                        openInstallSettings()
+                        result.success(null)
                     }
-                    try {
-                        installApk(File(path))
-                        result.success(true)
-                    } catch (error: Exception) {
-                        result.error("install-failed", error.message, null)
+                    "installApk" -> {
+                        val path = call.argument<String>("path")
+                        if (path.isNullOrEmpty()) {
+                            result.error("bad-arguments", "Missing APK path", null)
+                            return@setMethodCallHandler
+                        }
+                        if (!canInstallPackages()) {
+                            openInstallSettings()
+                            result.success(false)
+                            return@setMethodCallHandler
+                        }
+                        try {
+                            installApk(File(path))
+                            result.success(true)
+                        } catch (error: Exception) {
+                            result.error("install-failed", error.message, null)
+                        }
                     }
+                    else -> result.notImplemented()
                 }
-                else -> result.notImplemented()
             }
         }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        methodChannel?.invokeMethod("installPermissionChanged", canInstallPackages())
+    }
+
+    override fun onDestroy() {
+        methodChannel?.setMethodCallHandler(null)
+        methodChannel = null
+        super.onDestroy()
     }
 
     /** True when this app is allowed to prompt for package installs. */
@@ -61,9 +81,16 @@ class MainActivity : FlutterActivity() {
             val intent = Intent(
                 Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
                 Uri.parse("package:$packageName")
-            )
-            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-            startActivity(intent)
+            ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            if (intent.resolveActivity(packageManager) != null) {
+                startActivity(intent)
+            } else {
+                val fallback = Intent(
+                    Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                    Uri.parse("package:$packageName")
+                ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                startActivity(fallback)
+            }
         }
     }
 
