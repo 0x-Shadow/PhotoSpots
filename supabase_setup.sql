@@ -121,6 +121,13 @@ create table if not exists blocked_users (
   check (blocker_id <> blocked_id)
 );
 
+-- Clean up null or duplicate spot_views before applying NOT NULL and UNIQUE constraints
+delete from spot_views where viewer is null;
+delete from spot_views a using spot_views b
+ where a.viewer = b.viewer
+   and a.spot_id = b.spot_id
+   and a.id > b.id;
+
 -- ---------------------------------------------------------------------------
 -- 2. DE-DUPLICATE HISTORICAL SPOTS BEFORE INDEXES & SEED
 -- ---------------------------------------------------------------------------
@@ -180,12 +187,6 @@ delete from spots s using _spot_dupes d where s.id = d.dupe_id;
 
 drop table if exists _spot_dupes;
 drop table if exists _spot_keep;
-
--- Also clean up any duplicate spot_views per (spot_id, viewer)
-delete from spot_views a using spot_views b
- where a.viewer = b.viewer
-   and a.spot_id = b.spot_id
-   and a.id > b.id;
 
 -- ---------------------------------------------------------------------------
 -- 3. CONSTRAINTS & INDEXES
