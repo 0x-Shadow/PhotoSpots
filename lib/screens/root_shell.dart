@@ -39,8 +39,7 @@ int _screenIndexForSlot(int slot) => slot > 2 ? slot - 1 : slot;
 
 int _slotForScreenIndex(int index) => index >= 2 ? index + 1 : index;
 
-class _RootShellState extends State<RootShell>
-    with TickerProviderStateMixin {
+class _RootShellState extends State<RootShell> with TickerProviderStateMixin {
   /// Screen index (0–3); the Add slot sits between Map and Saved in the bar.
   int _index = 0;
 
@@ -178,6 +177,9 @@ class _RootShellState extends State<RootShell>
 
         return Scaffold(
           backgroundColor: AppColors.background,
+          // Let the content continue behind the pill so the frosted material
+          // samples the actual page instead of an opaque scaffold gutter.
+          extendBody: true,
           body: Stack(
             children: [
               _animatedScreen(),
@@ -207,7 +209,7 @@ class _RootShellState extends State<RootShell>
   }
 }
 
-/// Soft warm ambient bloom that rises from the floating bar when switching pages.
+/// Soft cool ambient bloom that rises from the floating glass when switching pages.
 class _WarmPageGlowPainter extends CustomPainter {
   const _WarmPageGlowPainter({required this.progress});
 
@@ -224,9 +226,9 @@ class _WarmPageGlowPainter extends CustomPainter {
         center,
         size.width * 0.65,
         [
-          const Color(0xFFFF9F43).withValues(alpha: 0.16 * intensity),
-          const Color(0xFFFF6B4A).withValues(alpha: 0.06 * intensity),
-          const Color(0xFFFF6B4A).withValues(alpha: 0.0),
+          const Color(0xFF57B6FF).withValues(alpha: 0.14 * intensity),
+          const Color(0xFF2D6CFF).withValues(alpha: 0.05 * intensity),
+          const Color(0xFF2D6CFF).withValues(alpha: 0.0),
         ],
         [0.0, 0.45, 1.0],
       );
@@ -237,7 +239,7 @@ class _WarmPageGlowPainter extends CustomPainter {
   bool shouldRepaint(covariant _WarmPageGlowPainter oldDelegate) => true;
 }
 
-/// Floating rounded glassmorphic navigation bar with warm active glow.
+/// Floating rounded, genuinely blurred glass navigation bar.
 class _NavBar extends StatefulWidget {
   const _NavBar({required this.selectedSlot, required this.onSlotSelected});
 
@@ -261,7 +263,7 @@ class _NavBar extends StatefulWidget {
   ];
 
   /// Pill height floating above the bottom safe area.
-  static const double barHeight = 62;
+  static const double barHeight = 66;
 
   @override
   State<_NavBar> createState() => _NavBarState();
@@ -292,9 +294,10 @@ class _NavBarState extends State<_NavBar> with SingleTickerProviderStateMixin {
     final from = _slotAnimation.value;
     final to = slot.toDouble();
     _tappedSlot = slot;
-    _slotAnimation = Tween<double>(begin: from, end: to).animate(
-      _springController,
-    );
+    _slotAnimation = Tween<double>(
+      begin: from,
+      end: to,
+    ).animate(_springController);
     final simulation = SpringSimulation(
       const SpringDescription(mass: 1.0, stiffness: 210.0, damping: 17.0),
       _springController.value,
@@ -326,20 +329,26 @@ class _NavBarState extends State<_NavBar> with SingleTickerProviderStateMixin {
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.fromLTRB(18, 2, 18, 10),
+      padding: const EdgeInsets.fromLTRB(18, 0, 18, 12),
       child: SizedBox(
         height: _NavBar.barHeight,
         child: Stack(
           clipBehavior: Clip.none,
           children: [
             Positioned.fill(
-              child: RepaintBoundary(
-                child: CustomPaint(
-                  painter: _GlassBarPainter(
-                    slotAnimation: _slotAnimation,
-                    springValue: _springController,
-                    tappedSlot: _tappedSlot,
-                    slotCount: _NavBar._items.length,
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(_NavBar.barHeight / 2),
+                child: BackdropFilter(
+                  filter: ui.ImageFilter.blur(sigmaX: 18, sigmaY: 18),
+                  child: RepaintBoundary(
+                    child: CustomPaint(
+                      painter: _GlassBarPainter(
+                        slotAnimation: _slotAnimation,
+                        springValue: _springController,
+                        tappedSlot: _tappedSlot,
+                        slotCount: _NavBar._items.length,
+                      ),
+                    ),
                   ),
                 ),
               ),
@@ -380,9 +389,9 @@ class _GlassBarPainter extends CustomPainter {
   final int tappedSlot;
   final int slotCount;
 
-  static const _warmTop = Color(0xFFFFC078);
-  static const _warmMid = Color(0xFFFF9F43);
-  static const _warmDeep = Color(0xFFFF7A2E);
+  static const _liquidTop = Color(0xFFA9E4FF);
+  static const _liquidMid = Color(0xFF57B6FF);
+  static const _liquidDeep = Color(0xFF2D6CFF);
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -390,12 +399,9 @@ class _GlassBarPainter extends CustomPainter {
     final height = size.height;
     final slotWidth = width / slotCount;
     final rect = Offset.zero & size;
-    final rrect = RRect.fromRectAndRadius(
-      rect,
-      const Radius.circular(31),
-    );
+    final rrect = RRect.fromRectAndRadius(rect, const Radius.circular(31));
 
-    // 1. Floating drop shadow
+    // 1. Floating shadow gives the material a clear edge above the content.
     final shadowPaint = Paint()
       ..color = const Color(0x99000000)
       ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 12);
@@ -404,31 +410,24 @@ class _GlassBarPainter extends CustomPainter {
     canvas.drawRRect(rrect, shadowPaint);
     canvas.restore();
 
-    // 2. Frosted glass base
+    // 2. A translucent layer over a real BackdropFilter creates the frosted
+    // glass instead of imitating blur with a solid painted background.
     final glassPaint = Paint()
-      ..shader = ui.Gradient.linear(
-        Offset(0, 0),
-        Offset(0, height),
-        const [
-          Color(0xF21E1E26),
-          Color(0xF2141419),
-        ],
-      );
+      ..shader = ui.Gradient.linear(Offset(0, 0), Offset(0, height), const [
+        Color(0xB81E2330),
+        Color(0xA0101119),
+      ]);
     canvas.drawRRect(rrect, glassPaint);
 
     // Subtle top sheen
     final sheenPaint = Paint()
-      ..shader = ui.Gradient.linear(
-        Offset(0, 0),
-        Offset(0, height * 0.65),
-        [
-          Colors.white.withValues(alpha: 0.07),
-          Colors.white.withValues(alpha: 0.0),
-        ],
-      );
+      ..shader = ui.Gradient.linear(Offset(0, 0), Offset(0, height * 0.65), [
+        Colors.white.withValues(alpha: 0.07),
+        Colors.white.withValues(alpha: 0.0),
+      ]);
     canvas.drawRRect(rrect, sheenPaint);
 
-    // 3. Soft warm radial glow following the active slot
+    // 3. Cool liquid light follows the selected destination.
     final activeX = (slotAnimation.value + 0.5) * slotWidth;
     final centerY = height / 2;
     final pulseT = springValue.value.clamp(0.0, 1.0);
@@ -441,41 +440,50 @@ class _GlassBarPainter extends CustomPainter {
         Offset(activeX, centerY + 2),
         slotWidth * 0.78,
         [
-          _warmTop.withValues(alpha: 0.38 + pulseBoost),
-          _warmMid.withValues(alpha: 0.16 + pulseBoost * 0.5),
-          _warmDeep.withValues(alpha: 0.0),
+          _liquidTop.withValues(alpha: 0.28 + pulseBoost),
+          _liquidMid.withValues(alpha: 0.12 + pulseBoost * 0.5),
+          _liquidDeep.withValues(alpha: 0.0),
         ],
         [0.0, 0.45, 1.0],
       );
 
-    // Also add center glow on Add button (slot 2)
+    // The add control stays quietly discoverable without competing with the
+    // selected-tab indicator.
     final addCenterX = 2.5 * slotWidth;
     final addGlowPaint = Paint()
       ..shader = ui.Gradient.radial(
         Offset(addCenterX, centerY),
         slotWidth * 0.65,
         [
-          _warmMid.withValues(alpha: 0.20),
-          _warmDeep.withValues(alpha: 0.0),
+          _liquidMid.withValues(alpha: 0.16),
+          _liquidDeep.withValues(alpha: 0.0),
         ],
         [0.0, 1.0],
       );
 
-    canvas.drawCircle(Offset(activeX, centerY + 2), slotWidth * 0.78, glowPaint);
-    canvas.drawCircle(Offset(addCenterX, centerY), slotWidth * 0.65, addGlowPaint);
+    canvas.drawCircle(
+      Offset(activeX, centerY + 2),
+      slotWidth * 0.78,
+      glowPaint,
+    );
+    canvas.drawCircle(
+      Offset(addCenterX, centerY),
+      slotWidth * 0.65,
+      addGlowPaint,
+    );
 
-    // Expanding warm tap ripple when tapped
+    // Expanding liquid tap ripple.
     if (pulseT > 0 && pulseT < 1) {
       final tappedX = (tappedSlot + 0.5) * slotWidth;
       final rippleRadius = 8.0 + pulseT * (slotWidth * 0.65);
       final ripplePaint = Paint()
         ..style = PaintingStyle.fill
-        ..color = _warmTop.withValues(alpha: (1.0 - pulseT) * 0.28);
+        ..color = _liquidTop.withValues(alpha: (1.0 - pulseT) * 0.2);
       canvas.drawCircle(Offset(tappedX, centerY), rippleRadius, ripplePaint);
     }
     canvas.restore();
 
-    // 4. Active tab capsule with glowing horizontal gradient rim
+    // 4. Active tab capsule with a softly refracted rim.
     final capsuleLeft = slotAnimation.value * slotWidth + 5.0;
     final capsuleRect = Rect.fromLTWH(
       capsuleLeft,
@@ -488,14 +496,13 @@ class _GlassBarPainter extends CustomPainter {
       const Radius.circular(26),
     );
 
-    final capsuleFill = Paint()
-      ..color = _warmTop.withValues(alpha: 0.12);
+    final capsuleFill = Paint()..color = _liquidTop.withValues(alpha: 0.10);
     canvas.drawRRect(capsuleRRect, capsuleFill);
 
     final rimGlowPaint = Paint()
       ..style = PaintingStyle.stroke
       ..strokeWidth = 3.2
-      ..color = _warmMid.withValues(alpha: 0.28)
+      ..color = _liquidMid.withValues(alpha: 0.24)
       ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 3);
     canvas.drawRRect(capsuleRRect, rimGlowPaint);
 
@@ -506,10 +513,10 @@ class _GlassBarPainter extends CustomPainter {
         Offset(capsuleLeft, 0),
         Offset(capsuleLeft + capsuleRect.width, 0),
         [
-          _warmTop.withValues(alpha: 0.05),
-          _warmTop.withValues(alpha: 0.85),
-          _warmMid.withValues(alpha: 0.95),
-          _warmTop.withValues(alpha: 0.05),
+          _liquidTop.withValues(alpha: 0.05),
+          _liquidTop.withValues(alpha: 0.78),
+          _liquidMid.withValues(alpha: 0.9),
+          _liquidTop.withValues(alpha: 0.05),
         ],
         [0.0, 0.28, 0.72, 1.0],
       );
@@ -558,9 +565,7 @@ class _NavItem extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final reduceMotion = MediaQuery.disableAnimationsOf(context);
-    final color = selected
-        ? const Color(0xFFFFC078)
-        : AppColors.textSecondary;
+    final color = selected ? const Color(0xFFA9E4FF) : AppColors.textSecondary;
     return Semantics(
       button: true,
       selected: selected,
@@ -589,9 +594,8 @@ class _NavItem extends StatelessWidget {
                       shadows: selected && !reduceMotion
                           ? [
                               Shadow(
-                                color: const Color(
-                                  0xFFFF9F43,
-                                ).withValues(alpha: 0.65 * t),
+                                color: const Color(0xFF57B6FF)
+                                    .withValues(alpha: 0.65 * t),
                                 blurRadius: 9,
                               ),
                             ]
@@ -623,7 +627,7 @@ class _NavItem extends StatelessWidget {
   }
 }
 
-/// The always-available middle slot with a warm sunset gradient orb.
+/// The always-available middle slot with a refracted liquid-glass orb.
 class _AddAction extends StatelessWidget {
   const _AddAction({required this.onTap});
 
@@ -645,7 +649,7 @@ class _AddAction extends StatelessWidget {
               gradient: const LinearGradient(
                 begin: Alignment.topLeft,
                 end: Alignment.bottomRight,
-                colors: [Color(0xFFFFC078), Color(0xFFFF8A3D)],
+                colors: [Color(0xFFA9E4FF), Color(0xFF57B6FF)],
               ),
               border: Border.all(
                 color: Colors.white.withValues(alpha: 0.45),
@@ -653,7 +657,7 @@ class _AddAction extends StatelessWidget {
               ),
               boxShadow: const [
                 BoxShadow(
-                  color: Color(0x59FF9F0A),
+                  color: Color(0x6657B6FF),
                   blurRadius: 12,
                   offset: Offset(0, 4),
                 ),
@@ -661,7 +665,7 @@ class _AddAction extends StatelessWidget {
             ),
             child: const Icon(
               Icons.add_rounded,
-              color: Color(0xFF1A0F05),
+              color: Color(0xFF07111E),
               size: 25,
             ),
           ),
@@ -704,9 +708,7 @@ class _SideRail extends StatelessWidget {
         color: AppColors.textPrimary,
         fontWeight: FontWeight.w700,
       ),
-      unselectedLabelTextStyle: labelStyle.copyWith(
-        color: AppColors.textFaint,
-      ),
+      unselectedLabelTextStyle: labelStyle.copyWith(color: AppColors.textFaint),
       leading: Padding(
         padding: const EdgeInsets.symmetric(vertical: 18),
         child: _AddAction(onTap: onAdd),

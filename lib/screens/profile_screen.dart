@@ -50,8 +50,9 @@ class ProfileScreen extends StatelessWidget {
                   ),
                   PressButton(
                     semanticLabel: 'Open settings',
-                    onTap: () => Navigator.of(context)
-                        .push(AppMotion.slideUp(const SettingsScreen())),
+                    onTap: () =>
+                        Navigator.of(context)
+                            .push(AppMotion.slideUp(const SettingsScreen())),
                     child: Container(
                       width: 44,
                       height: 44,
@@ -70,27 +71,32 @@ class ProfileScreen extends StatelessWidget {
                 ],
               ),
               const SizedBox(height: 14),
-              _IdentityCard(
-                auth: auth,
-                onEdit: () => showEditProfileSheet(context),
-              ),
-              const SizedBox(height: 12),
-              _AccountActions(
-                auth: auth,
-                onEdit: () => showEditProfileSheet(context),
-              ),
-              const SizedBox(height: 16),
-              _StatsRow(
-                saved: saved.length,
-                liked: state.likedCount,
-                viewed: state.viewedCount,
-                submitted: submitted.length,
-              ),
-              const SizedBox(height: 26),
-              _Interests(state: state),
-              const SizedBox(height: 26),
+              if (auth.isGuest) ...[
+                const _GuestProfileCard(),
+                const SizedBox(height: 24),
+              ] else ...[
+                _IdentityCard(
+                  auth: auth,
+                  onEdit: () => showEditProfileSheet(context),
+                ),
+                const SizedBox(height: 12),
+                _AccountActions(
+                  auth: auth,
+                  onEdit: () => showEditProfileSheet(context),
+                ),
+                const SizedBox(height: 16),
+                _StatsRow(
+                  saved: saved.length,
+                  liked: state.likedCount,
+                  viewed: state.viewedCount,
+                  submitted: submitted.length,
+                ),
+                const SizedBox(height: 26),
+                _Interests(state: state),
+                const SizedBox(height: 26),
+              ],
               _SavesPreview(saved: saved),
-              if (submitted.isNotEmpty) ...[
+              if (auth.isSignedIn && submitted.isNotEmpty) ...[
                 const SizedBox(height: 26),
                 _YourSpots(spots: submitted),
               ],
@@ -109,6 +115,88 @@ class ProfileScreen extends StatelessWidget {
             ],
           ),
         ),
+      ),
+    );
+  }
+}
+
+/// First-use account state. This intentionally carries no cached profile
+/// identity: a guest is browsing, not an account with missing details.
+class _GuestProfileCard extends StatelessWidget {
+  const _GuestProfileCard();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(24),
+        color: AppColors.surface,
+        border: Border.all(color: AppColors.hairline),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            width: 48,
+            height: 48,
+            decoration: BoxDecoration(
+              color: AppColors.accentSoft,
+              shape: BoxShape.circle,
+              border: Border.all(
+                color: AppColors.accent.withValues(alpha: 0.35),
+              ),
+            ),
+            child: const Icon(
+              Icons.person_outline_rounded,
+              color: AppColors.textPrimary,
+            ),
+          ),
+          const SizedBox(height: 16),
+          const Text(
+            'Explore without an account',
+            style: TextStyle(
+              color: AppColors.textPrimary,
+              fontSize: 21,
+              fontWeight: FontWeight.w800,
+              letterSpacing: -0.5,
+            ),
+          ),
+          const SizedBox(height: 6),
+          const Text(
+            'Browse the map and save places on this device. Create an account when you want to share spots, comment, or sync your saves.',
+            style: TextStyle(
+              color: AppColors.textSecondary,
+              fontSize: 13,
+              height: 1.45,
+            ),
+          ),
+          if (AuthState.supportsAccounts) ...[
+            const SizedBox(height: 18),
+            PressButton(
+              semanticLabel: 'Sign in or create account',
+              onTap: () =>
+                  Navigator.of(context)
+                      .push(AppMotion.slideUp(const AuthScreen())),
+              child: Container(
+                height: 48,
+                alignment: Alignment.center,
+                decoration: BoxDecoration(
+                  color: AppColors.action,
+                  borderRadius: BorderRadius.circular(999),
+                ),
+                child: const Text(
+                  'Sign in or create account',
+                  style: TextStyle(
+                    color: AppColors.onAction,
+                    fontSize: 14,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ],
       ),
     );
   }
@@ -192,30 +280,30 @@ class _IdentityCard extends StatelessWidget {
                                 fit: BoxFit.cover,
                               )
                             : (auth.avatarUrl?.isNotEmpty ?? false)
-                                ? Image.network(
-                                    auth.avatarUrl!,
-                                    width: 65,
-                                    height: 65,
-                                    fit: BoxFit.cover,
-                                    errorBuilder: (_, _, _) => Text(
-                                      auth.initials,
-                                      style: const TextStyle(
-                                        color: AppColors.textPrimary,
-                                        fontSize: 24,
-                                        fontWeight: FontWeight.w800,
-                                        letterSpacing: -0.5,
-                                      ),
-                                    ),
-                                  )
-                                : Text(
-                                    auth.initials,
-                                    style: const TextStyle(
-                                      color: AppColors.textPrimary,
-                                      fontSize: 24,
-                                      fontWeight: FontWeight.w800,
-                                      letterSpacing: -0.5,
-                                    ),
+                            ? Image.network(
+                                auth.avatarUrl!,
+                                width: 65,
+                                height: 65,
+                                fit: BoxFit.cover,
+                                errorBuilder: (_, _, _) => Text(
+                                  auth.initials,
+                                  style: const TextStyle(
+                                    color: AppColors.textPrimary,
+                                    fontSize: 24,
+                                    fontWeight: FontWeight.w800,
+                                    letterSpacing: -0.5,
                                   ),
+                                ),
+                              )
+                            : Text(
+                                auth.initials,
+                                style: const TextStyle(
+                                  color: AppColors.textPrimary,
+                                  fontSize: 24,
+                                  fontWeight: FontWeight.w800,
+                                  letterSpacing: -0.5,
+                                ),
+                              ),
                       ),
                     ),
                   ),
@@ -240,8 +328,8 @@ class _IdentityCard extends StatelessWidget {
                           auth.isSignedIn
                               ? auth.email
                               : auth.isLocalOnlyMode
-                                  ? 'Demo profile on this device'
-                                  : 'Browsing as a guest',
+                              ? 'Demo profile on this device'
+                              : 'Browsing as a guest',
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                           style: const TextStyle(
@@ -387,9 +475,8 @@ class _AccountActions extends StatelessWidget {
             onPressed: () async {
               await auth.signOut();
               if (!context.mounted) return;
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text('Signed out.')),
-              );
+              ScaffoldMessenger.of(context)
+                  .showSnackBar(const SnackBar(content: Text('Signed out.')));
             },
             style: OutlinedButton.styleFrom(
               foregroundColor: AppColors.textPrimary,
@@ -408,12 +495,11 @@ class _AccountActions extends StatelessWidget {
         if (AuthState.supportsAccounts) ...[
           _AccountButton(
             icon: Icons.lock_outline_rounded,
-            label:
-                'Guest mode is read-only. Sign in to publish spots, comment, and edit your cloud profile.',
+            label: 'Guest mode is read-only. Sign in to publish spots, comment, and edit your cloud profile.',
             tone: AppColors.accent,
-            onTap: () => Navigator.of(context).push(
-              AppMotion.slideUp(const AuthScreen()),
-            ),
+            onTap: () =>
+                Navigator.of(context)
+                    .push(AppMotion.slideUp(const AuthScreen())),
           ),
           const SizedBox(height: 10),
         ],
@@ -446,9 +532,9 @@ class _AccountActions extends StatelessWidget {
             const SizedBox(width: 8),
             Expanded(
               child: OutlinedButton(
-                onPressed: () => Navigator.of(context).push(
-                  AppMotion.slideUp(const AuthScreen()),
-                ),
+                onPressed: () =>
+                    Navigator.of(context)
+                        .push(AppMotion.slideUp(const AuthScreen())),
                 style: OutlinedButton.styleFrom(
                   foregroundColor: AppColors.textPrimary,
                   side: const BorderSide(color: AppColors.hairline),
@@ -504,7 +590,8 @@ class _AccountButton extends StatelessWidget {
                 ),
               ),
             ),
-            if (onTap != null) const Icon(Icons.chevron_right_rounded, size: 16),
+            if (onTap != null)
+              const Icon(Icons.chevron_right_rounded, size: 16),
           ],
         ),
       ),
@@ -637,7 +724,7 @@ class _Interests extends StatelessWidget {
         Text(
           categories.isEmpty
               ? 'Save, like or open a few spots and recommendations start '
-                  'adapting to you.'
+                    'adapting to you.'
               : 'Built from your saves, likes and views. ${_summary(categories)}',
           style: const TextStyle(
             color: AppColors.textSecondary,
@@ -699,7 +786,10 @@ class _Interests extends StatelessWidget {
   }
 
   static String _summary(List<SpotCategory> categories) {
-    final names = categories.take(2).map((c) => c.label.toLowerCase()).join(' and ');
+    final names = categories
+        .take(2)
+        .map((c) => c.label.toLowerCase())
+        .join(' and ');
     return 'You lean $names.';
   }
 }
@@ -729,10 +819,7 @@ class _SavesPreview extends StatelessWidget {
             ),
             Text(
               saved.isEmpty ? 'Nothing yet' : '${saved.length} saved',
-              style: const TextStyle(
-                color: AppColors.textFaint,
-                fontSize: 12,
-              ),
+              style: const TextStyle(color: AppColors.textFaint, fontSize: 12),
             ),
           ],
         ),
@@ -791,7 +878,10 @@ class _SavesPreview extends StatelessWidget {
                                 gradient: LinearGradient(
                                   begin: Alignment.topCenter,
                                   end: Alignment.bottomCenter,
-                                  colors: [Color(0x00000000), Color(0xCC000000)],
+                                  colors: [
+                                    Color(0x00000000),
+                                    Color(0xCC000000),
+                                  ],
                                 ),
                               ),
                             ),
@@ -992,15 +1082,17 @@ class _Shortcuts extends StatelessWidget {
               _ShortcutRow(
                 icon: Icons.map_outlined,
                 title: 'Plan a trip',
-                onTap: () => Navigator.of(context)
-                    .push(AppMotion.slideUp(const PlanTripScreen())),
+                onTap: () =>
+                    Navigator.of(context)
+                        .push(AppMotion.slideUp(const PlanTripScreen())),
               ),
               const Divider(height: 1, color: AppColors.hairline),
               _ShortcutRow(
                 icon: Icons.tune_rounded,
                 title: 'Settings',
-                onTap: () => Navigator.of(context)
-                    .push(AppMotion.slideUp(const SettingsScreen())),
+                onTap: () =>
+                    Navigator.of(context)
+                        .push(AppMotion.slideUp(const SettingsScreen())),
               ),
             ],
           ),

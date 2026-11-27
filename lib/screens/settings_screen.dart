@@ -69,55 +69,59 @@ class _SettingsScreenState extends State<SettingsScreen> {
             padding: const EdgeInsets.fromLTRB(20, 12, 20, 48),
             children: [
               _Section(
-                title: 'Profile & Account',
-                children: [
-                  _InfoRow(label: 'Status', value: auth.statusLabel),
-                  if (auth.isSignedIn)
-                    _InfoRow(label: 'Email', value: auth.email),
-                  _InfoRow(label: 'Display name', value: auth.displayName),
-                  if (auth.city.isNotEmpty)
-                    _InfoRow(label: 'Home city', value: auth.city),
-                  _ActionRow(
-                    icon: Icons.edit_outlined,
-                    label: 'Edit profile',
-                    subtitle: 'Name, bio, home city, and photo',
-                    onTap: () => showEditProfileSheet(context),
-                  ),
-                  if (auth.isSignedIn) ...[
-                    _ActionRow(
-                      icon: Icons.lock_reset_rounded,
-                      label: 'Change password',
-                      onTap: () => _changePassword(context, auth),
-                    ),
-                    _ActionRow(
-                      icon: Icons.logout_rounded,
-                      label: 'Sign out',
-                      onTap: () async {
-                        await auth.signOut();
-                        if (!context.mounted) return;
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(content: Text('Signed out.')),
-                        );
-                      },
-                    ),
-                  ] else
-                    _ActionRow(
-                      icon: Icons.person_add_alt_1_rounded,
-                      label: 'Sign in or create account',
-                      subtitle: AuthState.supportsAccounts
-                          ? 'Unlock publishing, comments, and sync'
-                          : 'Accounts require the hosted backend',
-                      onTap: () => Navigator.of(context).push(
-                        AppMotion.slideUp(const AuthScreen()),
-                      ),
-                    ),
-                  if (app.blockedUserIds.isNotEmpty)
-                    _ActionRow(
-                      icon: Icons.block_rounded,
-                      label: 'Blocked users (${app.blockedUserIds.length})',
-                      onTap: () => _manageBlockedUsers(context, app),
-                    ),
-                ],
+                title: 'Account',
+                children: auth.isSignedIn
+                    ? [
+                        _InfoRow(label: 'Status', value: auth.statusLabel),
+                        _InfoRow(label: 'Email', value: auth.email),
+                        _InfoRow(
+                          label: 'Display name',
+                          value: auth.displayName,
+                        ),
+                        if (auth.city.isNotEmpty)
+                          _InfoRow(label: 'Home city', value: auth.city),
+                        _ActionRow(
+                          icon: Icons.edit_outlined,
+                          label: 'Edit profile',
+                          subtitle: 'Name, bio, home city, and photo',
+                          onTap: () => showEditProfileSheet(context),
+                        ),
+                        _ActionRow(
+                          icon: Icons.lock_reset_rounded,
+                          label: 'Change password',
+                          onTap: () => _changePassword(context, auth),
+                        ),
+                        _ActionRow(
+                          icon: Icons.logout_rounded,
+                          label: 'Sign out',
+                          onTap: () async {
+                            await auth.signOut();
+                            if (!context.mounted) return;
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(content: Text('Signed out.')),
+                            );
+                          },
+                        ),
+                        if (app.blockedUserIds.isNotEmpty)
+                          _ActionRow(
+                            icon: Icons.block_rounded,
+                            label:
+                                'Blocked users (${app.blockedUserIds.length})',
+                            onTap: () => _manageBlockedUsers(context, app),
+                          ),
+                      ]
+                    : [
+                        const _GuestAccountMessage(),
+                        if (AuthState.supportsAccounts)
+                          _ActionRow(
+                            icon: Icons.person_add_alt_1_rounded,
+                            label: 'Sign in or create account',
+                            subtitle:
+                                'Publish spots, comment, and sync your saves',
+                            onTap: () => Navigator.of(context)
+                                .push(AppMotion.slideUp(const AuthScreen())),
+                          ),
+                      ],
               ),
               _Section(
                 title: 'Feed & Algorithm',
@@ -137,7 +141,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   ),
                   _InfoRow(
                     label: 'Learned from',
-                    value: '${app.savedIds.length} saves · '
+                    value:
+                        '${app.savedIds.length} saves · '
                         '${app.likedCount} likes · '
                         '${app.viewedCount} views',
                   ),
@@ -179,7 +184,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       padding: const EdgeInsets.only(left: 14, right: 14),
                       child: Text(
                         'Paste a CARTO API key to use this style.',
-                        style: theme.bodySmall?.copyWith(color: AppColors.danger),
+                        style: theme.bodySmall?.copyWith(
+                          color: AppColors.danger,
+                        ),
                       ),
                     ),
                   ],
@@ -198,8 +205,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           children: [
                             IconButton(
                               tooltip: _obscureCarto ? 'Show key' : 'Hide key',
-                              onPressed: () =>
-                                  setState(() => _obscureCarto = !_obscureCarto),
+                              onPressed: () => setState(
+                                () => _obscureCarto = !_obscureCarto,
+                              ),
                               icon: Icon(
                                 _obscureCarto
                                     ? Icons.visibility_off_rounded
@@ -255,11 +263,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   _ActionRow(
                     icon: Icons.location_on_outlined,
                     label: 'Manage location',
-                    onTap: () => runLocationFlow(
-                      context,
-                      explain: false,
-                      appState: app,
-                    ),
+                    onTap: () =>
+                        runLocationFlow(context, explain: false, appState: app),
                   ),
                   _ActionRow(
                     icon: Icons.phonelink_setup_rounded,
@@ -315,9 +320,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     icon: Icons.gavel_rounded,
                     label: 'Terms of Service',
                     onTap: () => Navigator.of(context).push(
-                      AppMotion.slideUp(
-                        const LegalScreen(doc: LegalDoc.terms),
-                      ),
+                      AppMotion.slideUp(const LegalScreen(doc: LegalDoc.terms)),
                     ),
                   ),
                   _ActionRow(
@@ -382,20 +385,20 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   static String _sortLabel(String id) => switch (id) {
-        'nearest' => 'Nearest',
-        'top_rated' => 'Top rated',
-        'saved' => 'Most saved',
-        _ => 'Recommended for you',
-      };
+    'nearest' => 'Nearest',
+    'top_rated' => 'Top rated',
+    'saved' => 'Most saved',
+    _ => 'Recommended for you',
+  };
 
   static String _locationStatus(LocationOutcome? outcome) => switch (outcome) {
-        LocationOutcome.granted => 'Ready',
-        null => 'Not requested yet',
-        LocationOutcome.servicesOff => 'Services off',
-        LocationOutcome.blocked => 'Blocked',
-        LocationOutcome.denied => 'Not granted',
-        LocationOutcome.failed => 'Unavailable',
-      };
+    LocationOutcome.granted => 'Ready',
+    null => 'Not requested yet',
+    LocationOutcome.servicesOff => 'Services off',
+    LocationOutcome.blocked => 'Blocked',
+    LocationOutcome.denied => 'Not granted',
+    LocationOutcome.failed => 'Unavailable',
+  };
 
   Future<void> _chooseDefaultSort(
     BuildContext context,
@@ -508,9 +511,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
     if (newPass == null || !context.mounted) return;
     final res = await auth.updatePassword(newPass);
     if (!context.mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(res.message ?? 'Done.')),
-    );
+    ScaffoldMessenger.of(context)
+        .showSnackBar(SnackBar(content: Text(res.message ?? 'Done.')));
   }
 
   Future<void> _manageBlockedUsers(BuildContext context, AppState app) async {
@@ -619,9 +621,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
       await app.clearAllLocalActivity();
     }
     if (!context.mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(res.message ?? 'Account deleted.')),
-    );
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text(res.message ?? 'Account deleted.')));
   }
 
   Future<void> _checkNow(BuildContext context) async {
@@ -643,7 +645,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final uri = Uri(
       scheme: 'mailto',
       path: AppInfo.supportEmail,
-      queryParameters: {'subject': '${AppInfo.name} v${AppInfo.version} support'},
+      queryParameters: {
+        'subject': '${AppInfo.name} v${AppInfo.version} support',
+      },
     );
     try {
       final opened = await launchUrl(uri);
@@ -653,7 +657,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
     await Clipboard.setData(const ClipboardData(text: AppInfo.supportEmail));
     if (!context.mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Support email copied: ${AppInfo.supportEmail}')),
+      const SnackBar(
+        content: Text('Support email copied: ${AppInfo.supportEmail}'),
+      ),
     );
   }
 
@@ -666,9 +672,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       );
       if (!opened && context.mounted) {
         messenger.showSnackBar(
-          SnackBar(
-            content: SelectableText(AppInfo.releasesPage.toString()),
-          ),
+          SnackBar(content: SelectableText(AppInfo.releasesPage.toString())),
         );
       }
     } catch (_) {
@@ -697,9 +701,8 @@ class _Section extends StatelessWidget {
             padding: const EdgeInsets.only(left: 4, bottom: 8),
             child: Text(
               title,
-              style: Theme.of(context).textTheme.labelMedium?.copyWith(
-                    color: AppColors.textSecondary,
-                  ),
+              style: Theme.of(context).textTheme.labelMedium
+                  ?.copyWith(color: AppColors.textSecondary),
             ),
           ),
           DecoratedBox(
@@ -755,8 +758,9 @@ class _SelectRow extends StatelessWidget {
                 child: Text(
                   label,
                   style: theme.bodyLarge?.copyWith(
-                    color:
-                        selected ? AppColors.textPrimary : AppColors.textSecondary,
+                    color: selected
+                        ? AppColors.textPrimary
+                        : AppColors.textSecondary,
                   ),
                 ),
               ),
@@ -858,6 +862,39 @@ class _ActionRow extends StatelessWidget {
             ],
           ),
         ),
+      ),
+    );
+  }
+}
+
+class _GuestAccountMessage extends StatelessWidget {
+  const _GuestAccountMessage();
+
+  @override
+  Widget build(BuildContext context) {
+    return const Padding(
+      padding: EdgeInsets.fromLTRB(14, 12, 14, 14),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'You’re browsing as a guest',
+            style: TextStyle(
+              color: AppColors.textPrimary,
+              fontSize: 15,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+          SizedBox(height: 4),
+          Text(
+            'No profile details are stored or shown until you sign in.',
+            style: TextStyle(
+              color: AppColors.textSecondary,
+              fontSize: 12.5,
+              height: 1.4,
+            ),
+          ),
+        ],
       ),
     );
   }

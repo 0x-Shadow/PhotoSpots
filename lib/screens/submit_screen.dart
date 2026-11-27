@@ -97,7 +97,12 @@ class _SubmitScreenState extends State<SubmitScreen> {
     final messenger = ScaffoldMessenger.of(context);
     final navigator = Navigator.of(context);
     try {
-      final picked = await ImagePicker().pickImage(source: source);
+      // Keep the original asset until GPS is read. Some platform pickers can
+      // return a metadata-stripped preview unless full metadata is requested.
+      final picked = await ImagePicker().pickImage(
+        source: source,
+        requestFullMetadata: true,
+      );
       if (picked == null) return;
       final bytes = await picked.readAsBytes();
       final gps = PhotoMetadata.readGps(bytes);
@@ -107,7 +112,16 @@ class _SubmitScreenState extends State<SubmitScreen> {
         _photoLocation = gps;
         _step = 1;
       });
-      if (gps != null) _applyPhotoLocation(gps);
+      if (gps != null) {
+        _applyPhotoLocation(gps);
+        messenger.showSnackBar(
+          const SnackBar(
+            content: Text(
+              'Photo location detected — the pin uses where this photo was taken.',
+            ),
+          ),
+        );
+      }
     } catch (_) {
       if (!navigator.mounted) return;
       messenger.showSnackBar(
@@ -255,8 +269,9 @@ class _SubmitScreenState extends State<SubmitScreen> {
     try {
       // EXIF GPS was already extracted at pick time; compressForUpload strips
       // raw EXIF/XMP metadata before uploading to public storage.
-      final photoBytes =
-          _photoBytes == null ? null : await compressForUpload(_photoBytes!);
+      final photoBytes = _photoBytes == null
+          ? null
+          : await compressForUpload(_photoBytes!);
       await app.submitSpot(
         title: _draft.name.trim(),
         description: _draft.tip.trim().isEmpty
@@ -358,9 +373,9 @@ class _SubmitScreenState extends State<SubmitScreen> {
                   const SizedBox(height: 24),
                   PressButton(
                     semanticLabel: 'Sign in or create account',
-                    onTap: () => Navigator.of(context).push(
-                      AppMotion.slideUp(const AuthScreen()),
-                    ),
+                    onTap: () =>
+                        Navigator.of(context)
+                            .push(AppMotion.slideUp(const AuthScreen())),
                     child: Container(
                       height: 52,
                       alignment: Alignment.center,
@@ -638,7 +653,9 @@ class _PhotoStudioStep extends StatelessWidget {
                             ),
                           ),
                         Text(
-                          hasPhoto ? 'Tap to swap photo' : 'Tap to choose a photo',
+                          hasPhoto
+                              ? 'Tap to swap photo'
+                              : 'Tap to choose a photo',
                           style: const TextStyle(
                             color: AppColors.textPrimary,
                             fontSize: 17,
@@ -921,19 +938,19 @@ class _PinAndDetailsStep extends StatelessWidget {
                     ),
                   )
                 : (searchController.text.isEmpty
-                    ? null
-                    : IconButton(
-                        tooltip: 'Clear search',
-                        onPressed: () {
-                          searchController.clear();
-                          onSearch('');
-                        },
-                        icon: const Icon(
-                          Icons.close_rounded,
-                          color: AppColors.textFaint,
-                          size: 18,
-                        ),
-                      )),
+                      ? null
+                      : IconButton(
+                          tooltip: 'Clear search',
+                          onPressed: () {
+                            searchController.clear();
+                            onSearch('');
+                          },
+                          icon: const Icon(
+                            Icons.close_rounded,
+                            color: AppColors.textFaint,
+                            size: 18,
+                          ),
+                        )),
           ),
         ),
         if (suggestions.isNotEmpty) ...[
@@ -1014,7 +1031,8 @@ class _PinAndDetailsStep extends StatelessWidget {
                       maxZoom: 18,
                       backgroundColor: AppColors.mapBackground,
                       interactionOptions: const InteractionOptions(
-                        flags: InteractiveFlag.drag |
+                        flags:
+                            InteractiveFlag.drag |
                             InteractiveFlag.pinchZoom |
                             InteractiveFlag.doubleTapZoom |
                             InteractiveFlag.flingAnimation,
@@ -1105,12 +1123,14 @@ class _PinAndDetailsStep extends StatelessWidget {
                   resolving
                       ? 'Finding the address…'
                       : address.isEmpty
-                          ? '${pinned.latitude.toStringAsFixed(5)}, '
-                              '${pinned.longitude.toStringAsFixed(5)}'
-                          : address,
+                      ? '${pinned.latitude.toStringAsFixed(5)}, '
+                            '${pinned.longitude.toStringAsFixed(5)}'
+                      : address,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  style: theme.bodySmall?.copyWith(color: AppColors.textPrimary),
+                  style: theme.bodySmall?.copyWith(
+                    color: AppColors.textPrimary,
+                  ),
                 ),
               ),
             ],

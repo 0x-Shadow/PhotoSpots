@@ -7,8 +7,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import 'helpers/test_harness.dart';
 
-Widget _app({Widget home = const SettingsScreen()}) =>
-    testApp(home: home);
+Widget _app({Widget home = const SettingsScreen()}) => testApp(home: home);
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -59,18 +58,15 @@ void main() {
     expect(prefs.getString(SettingsState.mapStyleKey), isNull);
   });
 
-  testWidgets('settings exposes edit profile, legal docs, and algorithm toggles', (
+  testWidgets('guest settings expose an honest account state and legal docs', (
     tester,
   ) async {
     await tester.pumpWidget(_app());
     await tester.pump();
 
-    await tester.tap(find.text('Edit profile'));
-    await tester.pumpAndSettle();
-    expect(find.byKey(const ValueKey('profile_name')), findsOneWidget);
-    Navigator.of(tester.element(find.byKey(const ValueKey('profile_name'))))
-        .pop();
-    await tester.pumpAndSettle();
+    expect(find.text('You’re browsing as a guest'), findsOneWidget);
+    expect(find.text('Display name'), findsNothing);
+    expect(find.text('Edit profile'), findsNothing);
 
     final privacy = find.text('Privacy Policy');
     await tester.scrollUntilVisible(

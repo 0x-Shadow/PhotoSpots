@@ -132,7 +132,7 @@ points at your long-lived Android signing key, then run:
 
 ```bash
 flutter build apk --release \
-  --dart-define=APP_VERSION=1.0.15 \
+  --dart-define=APP_VERSION=1.0.16 \
   --dart-define=ENABLE_SELF_UPDATE=true \
   --dart-define=SUPABASE_URL=https://YOUR-PROJECT.supabase.co \
   --dart-define=SUPABASE_ANON_KEY=YOUR-PUBLISHABLE-ANON-KEY

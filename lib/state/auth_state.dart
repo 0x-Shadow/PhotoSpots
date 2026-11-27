@@ -55,7 +55,8 @@ class AuthState extends ChangeNotifier {
   bool _disposed = false;
 
   sb.User? get user => _user;
-  sb.Session? get session => _user == null ? null : _client?.auth.currentSession;
+  sb.Session? get session =>
+      _user == null ? null : _client?.auth.currentSession;
   bool get loading => _loading;
   bool get busy => _busy;
 
@@ -175,9 +176,15 @@ class AuthState extends ChangeNotifier {
       final remoteBio = (row['bio'] as String?)?.trim() ?? '';
       final remoteCity = (row['city'] as String?)?.trim() ?? '';
       final remoteAvatar = (row['avatar_url'] as String?)?.trim();
-      if (remoteName.isNotEmpty) _displayName = remoteName;
-      if (remoteBio.isNotEmpty) _bio = remoteBio;
-      if (remoteCity.isNotEmpty) _city = remoteCity;
+      if (remoteName.isNotEmpty) {
+        _displayName = remoteName;
+      }
+      if (remoteBio.isNotEmpty) {
+        _bio = remoteBio;
+      }
+      if (remoteCity.isNotEmpty) {
+        _city = remoteCity;
+      }
       if (remoteAvatar != null && remoteAvatar.isNotEmpty) {
         _avatarUrl = remoteAvatar;
       }
@@ -204,7 +211,9 @@ class AuthState extends ChangeNotifier {
   }) async {
     final emailError = Validators.email(email);
     if (emailError != null) return AuthResult.failed(emailError);
-    if (password.isEmpty) return const AuthResult.failed('Enter your password.');
+    if (password.isEmpty) {
+      return const AuthResult.failed('Enter your password.');
+    }
 
     final client = _client;
     if (client == null) {
@@ -307,6 +316,10 @@ class AuthState extends ChangeNotifier {
       }
     }
     _user = null;
+    // A guest must never inherit the last account's identity, avatar or home
+    // city. Besides being confusing, leaving this cached data on screen is a
+    // privacy leak on a shared device.
+    await _clearCachedProfile();
     _notify();
   }
 
@@ -328,7 +341,9 @@ class AuthState extends ChangeNotifier {
     }
     final trimmedCity = (city ?? _city).trim();
     if (trimmedCity.length > 80) {
-      return const AuthResult.failed('Keep your home city under 80 characters.');
+      return const AuthResult.failed(
+        'Keep your home city under 80 characters.',
+      );
     }
 
     _displayName = name.trim();
@@ -350,7 +365,9 @@ class AuthState extends ChangeNotifier {
           final uploadBytes = _localAvatarBytes ?? avatarBytes;
           final path =
               'avatars/${_user!.id}/${DateTime.now().millisecondsSinceEpoch}.jpg';
-          await client.storage.from('photos').uploadBinary(
+          await client.storage
+              .from('photos')
+              .uploadBinary(
                 path,
                 uploadBytes,
                 fileOptions: const sb.FileOptions(contentType: 'image/jpeg'),
@@ -447,6 +464,12 @@ class AuthState extends ChangeNotifier {
     }
 
     _user = null;
+    await _clearCachedProfile();
+    _notify();
+    return const AuthResult.ok('Account deleted.');
+  }
+
+  Future<void> _clearCachedProfile() async {
     _displayName = '';
     _bio = '';
     _city = '';
@@ -458,9 +481,9 @@ class AuthState extends ChangeNotifier {
       await prefs.remove(bioKey);
       await prefs.remove(cityKey);
       await prefs.remove(avatarBase64Key);
-    } catch (_) {}
-    _notify();
-    return const AuthResult.ok('Account deleted.');
+    } catch (_) {
+      // Clearing an in-memory identity still keeps the signed-out UI private.
+    }
   }
 
   Future<void> _writePrefs() async {
@@ -469,7 +492,8 @@ class AuthState extends ChangeNotifier {
       await prefs.setString(displayNameKey, _displayName);
       await prefs.setString(bioKey, _bio);
       await prefs.setString(cityKey, _city);
-      if (_localAvatarBytes != null && _localAvatarBytes!.length <= 250 * 1024) {
+      if (_localAvatarBytes != null &&
+          _localAvatarBytes!.length <= 250 * 1024) {
         await prefs.setString(
           avatarBase64Key,
           base64Encode(_localAvatarBytes!),
@@ -502,8 +526,7 @@ class AuthState extends ChangeNotifier {
     if (code == 'email_not_confirmed') {
       return 'Confirm your email first — check your inbox.';
     }
-    if (code == 'over_request_rate_limit' ||
-        code == 'too_many_requests') {
+    if (code == 'over_request_rate_limit' || code == 'too_many_requests') {
       return 'Too many attempts. Wait a minute and try again.';
     }
     if (code == 'weak_password') {
