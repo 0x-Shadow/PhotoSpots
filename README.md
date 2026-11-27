@@ -78,7 +78,6 @@ Without backend values the app starts in **demo mode** with Lisbon seed data.
 Saves remain on the device; a submitted photo exists only for that app session.
 
 ```bash
-flutter run -d chrome
 flutter test
 flutter analyze
 ```
