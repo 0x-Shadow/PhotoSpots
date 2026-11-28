@@ -11,6 +11,8 @@ class SpotPhoto {
     this.uploadedBy,
     this.takenAt,
     this.bytes,
+    this.is360 = false,
+    this.isCover = false,
   });
 
   final String id;
@@ -21,6 +23,12 @@ class SpotPhoto {
 
   /// Local image data for photos submitted in demo mode (no storage bucket).
   final Uint8List? bytes;
+
+  /// True when this is an equirectangular 360° capture (DJI/Insta360/etc.).
+  final bool is360;
+
+  /// True when this photo is the spot's cover / "best" photo.
+  final bool isCover;
 }
 
 /// A photo-worthy location on the map.
@@ -212,6 +220,8 @@ class Spot {
                   'caption': p.caption,
                   'uploadedBy': p.uploadedBy,
                   'takenAt': p.takenAt?.toIso8601String(),
+                  'is360': p.is360,
+                  'isCover': p.isCover,
                 })
             .toList(),
       };
@@ -255,6 +265,8 @@ class Spot {
               takenAt: p['takenAt'] != null
                   ? DateTime.tryParse(p['takenAt'].toString())
                   : null,
+              is360: p['is360'] as bool? ?? false,
+              isCover: p['isCover'] as bool? ?? false,
             ),
           )
           .toList(),

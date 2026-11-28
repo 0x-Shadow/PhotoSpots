@@ -18,6 +18,7 @@ import '../widgets/comments_section.dart';
 import '../widgets/edit_spot_sheet.dart';
 import '../widgets/glass.dart';
 import '../widgets/moderation_dialogs.dart';
+import '../widgets/photo_360_viewer.dart';
 import '../widgets/spot_image.dart';
 import '../widgets/spot_mini_map.dart';
 import '../widgets/state_views.dart';
@@ -514,7 +515,16 @@ class _HeroGallery extends StatelessWidget {
               itemCount: photos.length,
               onPageChanged: onPageChanged,
               itemBuilder: (_, i) {
-                final image = SpotImage(photo: photos[i], iconSize: 48);
+                final photo = photos[i];
+                if (photo.is360) {
+                  return Photo360Viewer(
+                    image: photo.bytes != null
+                        ? MemoryImage(photo.bytes!)
+                        : NetworkImage(photo.url),
+                    height: 380,
+                  );
+                }
+                final image = SpotImage(photo: photo, iconSize: 48);
                 if (i == 0 && heroTag != null) {
                   return Hero(tag: heroTag!, child: image);
                 }

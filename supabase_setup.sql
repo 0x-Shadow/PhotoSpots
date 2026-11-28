@@ -66,7 +66,9 @@ create table if not exists photos (
   image_url text not null,
   caption text,
   taken_at timestamptz,
-  created_at timestamptz default now()
+  created_at timestamptz default now(),
+  -- True when this is an equirectangular 360° capture (DJI/Insta360/etc.).
+  is360 boolean not null default false
 );
 
 create table if not exists saves (
@@ -783,7 +785,7 @@ create policy "Photo owners can delete rows"
 -- Same defence as comments: clients may only supply content columns. Row ids,
 -- created_at and any future moderation column stay server-owned.
 revoke insert, update on photos from anon, authenticated;
-grant insert (spot_id, uploader, image_url, caption, taken_at)
+grant insert (spot_id, uploader, image_url, caption, taken_at, is360)
   on photos to authenticated;
 
 drop policy if exists "Users can view own saves" on saves;

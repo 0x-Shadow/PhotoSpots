@@ -6,6 +6,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../models/comment.dart';
 import '../models/spot.dart';
 import '../utils/validators.dart';
+import '../services/photo_format.dart';
 import 'spot_repository.dart';
 
 /// Supabase-backed repository. Used when SUPABASE_URL and SUPABASE_ANON_KEY
@@ -585,12 +586,14 @@ class SupabaseSpotRepository implements SpotRepository {
       throw const AppException('Sign in to add a photo.');
     }
     final photoUrl = await uploadPhoto(bytes: photoBytes, userId: userId);
+    final is360 = PhotoFormat.is360Equirectangular(photoBytes);
     final row = await _client
         .from('photos')
         .insert({
           'spot_id': spotId,
           'uploader': userId,
           'image_url': photoUrl,
+          'is360': is360,
           if (caption != null && caption.trim().isNotEmpty)
             'caption': caption.trim(),
           'taken_at': DateTime.now().toIso8601String(),
@@ -602,12 +605,12 @@ class SupabaseSpotRepository implements SpotRepository {
       id: row['id']?.toString() ?? '',
       url: row['image_url']?.toString() ?? photoUrl,
       caption: row['caption'] as String?,
-      // Only surface the uploader for the person who added the photo; other
-      // people's raw ids are not shown anywhere in the UI.
       uploadedBy: row['uploader']?.toString() == userId ? 'You' : null,
       takenAt: row['taken_at'] != null
           ? DateTime.tryParse(row['taken_at'].toString())
           : null,
+      is360: is360,
+      isCover: false,
     );
   }
 
@@ -661,6 +664,7 @@ class SupabaseSpotRepository implements SpotRepository {
             takenAt: p['taken_at'] != null
                 ? DateTime.tryParse(p['taken_at'].toString())
                 : null,
+            is360: p['is360'] as bool? ?? false,
           ),
         )
         .where((photo) => Validators.isSafeHttpsUrl(photo.url))

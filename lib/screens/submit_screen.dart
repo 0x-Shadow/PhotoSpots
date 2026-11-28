@@ -59,6 +59,12 @@ class _SubmitScreenState extends State<SubmitScreen> {
 
   Uint8List? _photoBytes;
   PhotoLocation? _photoLocation;
+  // Multi-photo draft: every photo picked for this spot, plus the index of the
+  // cover / "best" photo that leads the gallery. Photos without GPS still
+  // upload; only the first photo that carries GPS moves the pin.
+  final List<Uint8List> _photoBytesList = [];
+  final List<PhotoLocation?> _photoLocations = [];
+  int _coverIndex = 0;
   LatLng _pinned = AppState.fallbackCenter;
   String _address = '';
   bool _cityManual = false;
@@ -93,31 +99,64 @@ class _SubmitScreenState extends State<SubmitScreen> {
     super.dispose();
   }
 
-  Future<void> _pickPhoto(ImageSource source) async {
+  Future<void> _pickPhotos(ImageSource source) async {
     final messenger = ScaffoldMessenger.of(context);
     final navigator = Navigator.of(context);
     try {
-      // Keep the original asset until GPS is read. Some platform pickers can
+      // Keep the original assets until GPS is read. Some platform pickers can
       // return a metadata-stripped preview unless full metadata is requested.
-      final picked = await ImagePicker().pickImage(
-        source: source,
+      final picked = await ImagePicker().pickMultiImage(
         requestFullMetadata: true,
+        maxWidth: 1600,
+        maxHeight: 1600,
+        imageQuality: 85,
       );
-      if (picked == null) return;
-      final bytes = await picked.readAsBytes();
-      final gps = PhotoMetadata.readGps(bytes);
+      if (picked.isEmpty || !mounted) return;
+
+      final added = <Uint8List>[];
+      final locations = <PhotoLocation?>[];
+      var gpsApplied = false;
+
+      for (final file in picked) {
+        final bytes = await file.readAsBytes();
+        final gps = PhotoMetadata.readGps(bytes);
+        added.add(bytes);
+        locations.add(gps);
+        if (!gpsApplied && gps != null) {
+          gpsApplied = true;
+          if (!mounted) return;
+          setState(() {
+            _photoLocation = gps;
+          });
+          _applyPhotoLocation(gps);
+        }
+      }
+
       if (!mounted) return;
       setState(() {
-        _photoBytes = bytes;
-        _photoLocation = gps;
+        _photoBytesList.addAll(added);
+        _photoLocations.addAll(locations);
+        if (_photoBytes == null) {
+          _photoBytes = added.first;
+          _coverIndex = 0;
+        }
         _step = 1;
       });
-      if (gps != null) {
-        _applyPhotoLocation(gps);
+
+      if (gpsApplied) {
         messenger.showSnackBar(
           const SnackBar(
             content: Text(
-              'Photo location detected — the pin uses where this photo was taken.',
+              'Photo location detected — the pin uses where the photo was taken.',
+            ),
+          ),
+        );
+      } else if (added.isNotEmpty) {
+        messenger.showSnackBar(
+          SnackBar(
+            content: Text(
+              '${added.length} photo${added.length == 1 ? '' : 's'} added '
+              '(no GPS — you\'ll place the pin next).',
             ),
           ),
         );
@@ -134,6 +173,36 @@ class _SubmitScreenState extends State<SubmitScreen> {
         ),
       );
     }
+  }
+
+  /// Marks the photo at [index] as the cover / "best" photo that leads the
+  /// spot gallery.
+  void _setCover(int index) {
+    if (index < 0 || index >= _photoBytesList.length) return;
+    setState(() {
+      _coverIndex = index;
+      _photoBytes = _photoBytesList[index];
+      _photoLocation = _photoLocations[index];
+    });
+  }
+
+  void _removePhoto(int index) {
+    setState(() {
+      _photoBytesList.removeAt(index);
+      _photoLocations.removeAt(index);
+      if (_photoBytesList.isEmpty) {
+        _photoBytes = null;
+        _photoLocation = null;
+        _coverIndex = 0;
+      } else if (_coverIndex >= _photoBytesList.length) {
+        _coverIndex = _photoBytesList.length - 1;
+        _photoBytes = _photoBytesList[_coverIndex];
+        _photoLocation = _photoLocations[_coverIndex];
+      } else if (_coverIndex == index) {
+        _photoBytes = _photoBytesList[_coverIndex];
+        _photoLocation = _photoLocations[_coverIndex];
+      }
+    });
   }
 
   void _applyPhotoLocation(PhotoLocation gps) {
@@ -268,11 +337,12 @@ class _SubmitScreenState extends State<SubmitScreen> {
 
     try {
       // EXIF GPS was already extracted at pick time; compressForUpload strips
-      // raw EXIF/XMP metadata before uploading to public storage.
-      final photoBytes = _photoBytes == null
+      // raw EXIF/XMP metadata before uploading to public storage. The cover
+      // (best) photo goes with the spot; every additional photo follows.
+      final coverBytes = _photoBytes == null
           ? null
           : await compressForUpload(_photoBytes!);
-      await app.submitSpot(
+      final spot = await app.submitSpot(
         title: _draft.name.trim(),
         description: _draft.tip.trim().isEmpty
             ? 'A photo spot shared by the ${AppInfo.name} community.'
@@ -284,8 +354,29 @@ class _SubmitScreenState extends State<SubmitScreen> {
         focalLength: _draft.focalLength,
         tripodFriendly: _draft.tripodFriendly,
         accessNote: _draft.accessNote.trim(),
-        photoBytes: photoBytes,
+        photoBytes: coverBytes,
       );
+
+      // Add the remaining photos to the spot gallery.
+      if (_photoBytesList.length > 1 && mounted) {
+        var added = 0;
+        for (var i = 0; i < _photoBytesList.length; i++) {
+          if (i == _coverIndex) continue;
+          final sanitized = await compressForUpload(_photoBytesList[i]);
+          await app.addSpotPhoto(spotId: spot.id, photoBytes: sanitized);
+          added++;
+        }
+        if (!mounted) return;
+        messenger.showSnackBar(
+          SnackBar(
+            content: Text(
+              added == 0
+                  ? 'Spot added to the map.'
+                  : 'Spot added with ${added + 1} photo${added + 1 == 1 ? '' : 's'}.',
+            ),
+          ),
+        );
+      }
       if (!mounted) return;
       navigator.pop();
       messenger.showSnackBar(
@@ -465,9 +556,14 @@ class _SubmitScreenState extends State<SubmitScreen> {
               child: _step == 0
                   ? _PhotoStudioStep(
                       key: const ValueKey('step-photo'),
-                      photoBytes: _photoBytes,
-                      photoLocation: _photoLocation,
-                      onPick: _pickPhoto,
+                      photoBytesList: _photoBytesList,
+                      photoLocations: _photoLocations,
+                      coverPhotoBytes: _photoBytes ?? Uint8List(0),
+                      coverLocation: _photoLocation,
+                      coverIndex: _coverIndex,
+                      onPickPhotos: _pickPhotos,
+                      onSetCover: _setCover,
+                      onRemovePhoto: _removePhoto,
                       onContinue: _photoBytes == null
                           ? null
                           : () => setState(() => _step = 1),
@@ -522,21 +618,31 @@ class _SubmitScreenState extends State<SubmitScreen> {
 class _PhotoStudioStep extends StatelessWidget {
   const _PhotoStudioStep({
     super.key,
-    required this.photoBytes,
-    required this.photoLocation,
-    required this.onPick,
+    required this.photoBytesList,
+    required this.photoLocations,
+    required this.coverPhotoBytes,
+    required this.coverLocation,
+    required this.coverIndex,
+    required this.onPickPhotos,
+    required this.onSetCover,
+    required this.onRemovePhoto,
     required this.onContinue,
   });
 
-  final Uint8List? photoBytes;
-  final PhotoLocation? photoLocation;
-  final ValueChanged<ImageSource> onPick;
+  final List<Uint8List> photoBytesList;
+  final List<PhotoLocation?> photoLocations;
+  final Uint8List coverPhotoBytes;
+  final PhotoLocation? coverLocation;
+  final int coverIndex;
+  final ValueChanged<ImageSource> onPickPhotos;
+  final ValueChanged<int> onSetCover;
+  final ValueChanged<int> onRemovePhoto;
   final VoidCallback? onContinue;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context).textTheme;
-    final hasPhoto = photoBytes != null;
+    final hasPhoto = coverPhotoBytes.isNotEmpty;
 
     return ListView(
       padding: const EdgeInsets.fromLTRB(20, 8, 20, 32),
@@ -553,23 +659,117 @@ class _PhotoStudioStep extends StatelessWidget {
         ),
         const SizedBox(height: 6),
         Text(
-          'Pick a photo and we’ll read its GPS locally to place the pin, '
-          'then strip personal metadata before upload.',
+          'Pick one or more photos — we’ll read GPS locally to place the pin, '
+          'then strip personal metadata before upload. Choose the cover shot '
+          'that leads the gallery.',
           style: theme.bodyMedium,
         ),
         const SizedBox(height: 20),
-        GestureDetector(
-          onTap: () => onPick(ImageSource.gallery),
-          behavior: HitTestBehavior.opaque,
-          child: Container(
-            height: 310,
+        if (!hasPhoto) ...[
+          GestureDetector(
+            onTap: () => onPickPhotos(ImageSource.gallery),
+            behavior: HitTestBehavior.opaque,
+            child: Container(
+              height: 310,
+              decoration: BoxDecoration(
+                color: AppColors.surface,
+                borderRadius: BorderRadius.circular(24),
+                border: Border.all(
+                  color: const Color(0x26FFFFFF),
+                ),
+                boxShadow: const [
+                  BoxShadow(
+                    color: Color(0x66000000),
+                    blurRadius: 24,
+                    offset: Offset(0, 10),
+                  ),
+                ],
+              ),
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(23),
+                child: Stack(
+                  fit: StackFit.expand,
+                  children: [
+                    Image.asset(
+                      'assets/images/upload_hero.jpg',
+                      fit: BoxFit.cover,
+                      errorBuilder: (_, _, _) =>
+                          const ColoredBox(color: AppColors.surfaceElevated),
+                    ),
+                    const DecoratedBox(
+                      decoration: BoxDecoration(
+                        gradient: LinearGradient(
+                          begin: Alignment.topCenter,
+                          end: Alignment.bottomCenter,
+                          colors: [
+                            Color(0x22000000),
+                            Color(0x33000000),
+                            Color(0xCC0A0A0B),
+                          ],
+                          stops: [0.0, 0.5, 1.0],
+                        ),
+                      ),
+                    ),
+                    Positioned(
+                      left: 18,
+                      right: 18,
+                      bottom: 18,
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'Tap to choose a photo',
+                            style: const TextStyle(
+                              color: AppColors.textPrimary,
+                              fontSize: 17,
+                              fontWeight: FontWeight.w800,
+                            ),
+                          ),
+                          const SizedBox(height: 3),
+                          const Text(
+                            'JPEG, PNG or HEIC · EXIF metadata stripped on upload',
+                            style: TextStyle(
+                              color: Color(0xCCFFFFFF),
+                              fontSize: 12,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(height: 16),
+          Row(
+            children: [
+              Expanded(
+                child: _StudioButton(
+                  icon: Icons.photo_library_rounded,
+                  label: 'Gallery',
+                  filled: true,
+                  onTap: () => onPickPhotos(ImageSource.gallery),
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: _StudioButton(
+                  icon: Icons.photo_camera_rounded,
+                  label: 'Camera',
+                  onTap: () => onPickPhotos(ImageSource.camera),
+                ),
+              ),
+            ],
+          ),
+        ] else ...[
+          Container(
+            height: 220,
             decoration: BoxDecoration(
               color: AppColors.surface,
               borderRadius: BorderRadius.circular(24),
               border: Border.all(
-                color: hasPhoto
-                    ? AppColors.accent.withValues(alpha: 0.45)
-                    : const Color(0x26FFFFFF),
+                color: AppColors.accent.withValues(alpha: 0.45),
               ),
               boxShadow: const [
                 BoxShadow(
@@ -584,19 +784,11 @@ class _PhotoStudioStep extends StatelessWidget {
               child: Stack(
                 fit: StackFit.expand,
                 children: [
-                  if (hasPhoto)
-                    Image.memory(
-                      photoBytes!,
-                      fit: BoxFit.cover,
-                      cacheWidth: 1080,
-                    )
-                  else
-                    Image.asset(
-                      'assets/images/upload_hero.jpg',
-                      fit: BoxFit.cover,
-                      errorBuilder: (_, _, _) =>
-                          const ColoredBox(color: AppColors.surfaceElevated),
-                    ),
+                  Image.memory(
+                    coverPhotoBytes,
+                    fit: BoxFit.cover,
+                    cacheWidth: 1080,
+                  ),
                   const DecoratedBox(
                     decoration: BoxDecoration(
                       gradient: LinearGradient(
@@ -612,13 +804,12 @@ class _PhotoStudioStep extends StatelessWidget {
                     ),
                   ),
                   Positioned(
-                    left: 18,
-                    right: 18,
-                    bottom: 18,
+                    left: 16,
+                    bottom: 16,
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        if (hasPhoto && photoLocation != null)
+                        if (coverLocation != null)
                           Container(
                             margin: const EdgeInsets.only(bottom: 8),
                             padding: const EdgeInsets.symmetric(
@@ -642,7 +833,7 @@ class _PhotoStudioStep extends StatelessWidget {
                                 ),
                                 const SizedBox(width: 5),
                                 Text(
-                                  'GPS detected · $photoLocation',
+                                  'GPS detected · $coverLocation',
                                   style: const TextStyle(
                                     color: Colors.white,
                                     fontSize: 11,
@@ -652,7 +843,7 @@ class _PhotoStudioStep extends StatelessWidget {
                               ],
                             ),
                           )
-                        else if (hasPhoto)
+                        else
                           Container(
                             margin: const EdgeInsets.only(bottom: 8),
                             padding: const EdgeInsets.symmetric(
@@ -662,7 +853,9 @@ class _PhotoStudioStep extends StatelessWidget {
                             decoration: BoxDecoration(
                               color: const Color(0xB3000000),
                               borderRadius: BorderRadius.circular(999),
-                              border: Border.all(color: const Color(0x40FFFFFF)),
+                              border: Border.all(
+                                color: const Color(0x40FFFFFF),
+                              ),
                             ),
                             child: const Row(
                               mainAxisSize: MainAxisSize.min,
@@ -685,22 +878,23 @@ class _PhotoStudioStep extends StatelessWidget {
                               ],
                             ),
                           ),
-                        Text(
-                          hasPhoto
-                              ? 'Tap to swap photo'
-                              : 'Tap to choose a photo',
-                          style: const TextStyle(
-                            color: AppColors.textPrimary,
-                            fontSize: 17,
-                            fontWeight: FontWeight.w800,
+                        Container(
+                          margin: const EdgeInsets.only(bottom: 8),
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 10,
+                            vertical: 5,
                           ),
-                        ),
-                        const SizedBox(height: 3),
-                        const Text(
-                          'JPEG, PNG or HEIC · EXIF metadata stripped on upload',
-                          style: TextStyle(
-                            color: Color(0xCCFFFFFF),
-                            fontSize: 12,
+                          decoration: BoxDecoration(
+                            color: const Color(0xB3000000),
+                            borderRadius: BorderRadius.circular(999),
+                          ),
+                          child: const Text(
+                            'Cover photo',
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontSize: 11,
+                              fontWeight: FontWeight.w600,
+                            ),
                           ),
                         ),
                       ],
@@ -710,28 +904,126 @@ class _PhotoStudioStep extends StatelessWidget {
               ),
             ),
           ),
-        ),
-        const SizedBox(height: 16),
-        Row(
-          children: [
-            Expanded(
-              child: _StudioButton(
-                icon: Icons.photo_library_rounded,
-                label: hasPhoto ? 'Choose another' : 'Gallery',
-                filled: true,
-                onTap: () => onPick(ImageSource.gallery),
-              ),
+          const SizedBox(height: 14),
+          Text(
+            '${photoBytesList.length} photo${photoBytesList.length == 1 ? '' : 's'} · tap to pick cover',
+            style: theme.bodySmall?.copyWith(color: AppColors.textFaint),
+          ),
+          const SizedBox(height: 10),
+          SizedBox(
+            height: 88,
+            child: ListView.builder(
+              scrollDirection: Axis.horizontal,
+              itemCount: photoBytesList.length,
+              itemBuilder: (_, i) {
+                final isCover = i == coverIndex;
+                return GestureDetector(
+                  onTap: () => onSetCover(i),
+                  behavior: HitTestBehavior.opaque,
+                  child: Container(
+                    width: 88,
+                    margin: const EdgeInsets.only(right: 9),
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(14),
+                      border: Border.all(
+                        color: isCover
+                            ? AppColors.accent
+                            : Colors.transparent,
+                        width: isCover ? 2.5 : 0,
+                      ),
+                    ),
+                    child: Stack(
+                      fit: StackFit.expand,
+                      children: [
+                        ClipRRect(
+                          borderRadius: BorderRadius.circular(12),
+                          child: Image.memory(
+                            photoBytesList[i],
+                            fit: BoxFit.cover,
+                            cacheWidth: 220,
+                          ),
+                        ),
+                        Positioned(
+                          right: 4,
+                          top: 4,
+                          child: GestureDetector(
+                            onTap: () => onRemovePhoto(i),
+                            child: Container(
+                              decoration: BoxDecoration(
+                                color: const Color(0xCC000000),
+                                shape: BoxShape.circle,
+                              ),
+                              child: const Icon(
+                                Icons.close_rounded,
+                                color: Colors.white,
+                                size: 18,
+                              ),
+                            ),
+                          ),
+                        ),
+                        if (isCover)
+                          Positioned(
+                            left: 4,
+                            bottom: 4,
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 6,
+                                vertical: 3,
+                              ),
+                              decoration: BoxDecoration(
+                                color: AppColors.accent,
+                                borderRadius: BorderRadius.circular(999),
+                              ),
+                              child: const Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Icon(
+                                    Icons.center_focus_weak_rounded,
+                                    color: Colors.white,
+                                    size: 11,
+                                  ),
+                                  SizedBox(width: 4),
+                                  Text(
+                                    'Cover',
+                                    style: TextStyle(
+                                      color: Colors.white,
+                                      fontSize: 9,
+                                      fontWeight: FontWeight.w800,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                      ],
+                    ),
+                  ),
+                );
+              },
             ),
-            const SizedBox(width: 10),
-            Expanded(
-              child: _StudioButton(
-                icon: Icons.photo_camera_rounded,
-                label: 'Camera',
-                onTap: () => onPick(ImageSource.camera),
+          ),
+          const SizedBox(height: 16),
+          Row(
+            children: [
+              Expanded(
+                child: _StudioButton(
+                  icon: Icons.photo_library_rounded,
+                  label: 'Add more',
+                  filled: false,
+                  onTap: () => onPickPhotos(ImageSource.gallery),
+                ),
               ),
-            ),
-          ],
-        ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: _StudioButton(
+                  icon: Icons.photo_camera_rounded,
+                  label: 'Camera',
+                  onTap: () => onPickPhotos(ImageSource.camera),
+                ),
+              ),
+            ],
+          ),
+        ],
         if (onContinue != null) ...[
           const SizedBox(height: 12),
           PressButton(
