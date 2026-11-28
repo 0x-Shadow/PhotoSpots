@@ -273,6 +273,13 @@ class _UpdateSheetState extends State<UpdateSheet> with WidgetsBindingObserver {
     if (error.reason == 'incomplete') {
       return 'The download was interrupted. Please try again.';
     }
+    if (error.reason == 'checksum') {
+      return 'The downloaded file failed its integrity check and was '
+          'discarded. Please try again or open the release page.';
+    }
+    if (error.reason == 'too-large') {
+      return 'That update file is larger than expected and was discarded.';
+    }
     return 'The update could not be downloaded. Check your connection and '
         'try again.';
   }

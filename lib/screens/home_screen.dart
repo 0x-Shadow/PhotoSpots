@@ -207,7 +207,7 @@ class _HeroHeader extends StatelessWidget {
     final topInset = MediaQuery.paddingOf(context).top;
 
     return SizedBox(
-      height: topInset + 196,
+      height: topInset + 240,
       child: Stack(
         fit: StackFit.expand,
         children: [
@@ -271,29 +271,9 @@ class _HeroHeader extends StatelessWidget {
                         ),
                       ),
                     ),
-                    PressButton(
-                      semanticLabel: 'Search photo spots',
-                      onTap: () => Navigator.of(context).push(
-                        AppMotion.slideUp(const SearchScreen()),
-                      ),
-                      child: Container(
-                        width: 52,
-                        height: 52,
-                        decoration: BoxDecoration(
-                          color: const Color(0x26FFFFFF),
-                          shape: BoxShape.circle,
-                          border: Border.all(color: const Color(0x33FFFFFF)),
-                        ),
-                        child: const Icon(
-                          Icons.search_rounded,
-                          color: AppColors.textPrimary,
-                          size: 23,
-                        ),
-                      ),
-                    ),
                   ],
                 ),
-                const SizedBox(height: 16),
+                const SizedBox(height: 14),
                 const Text(
                   'Find a place\nworth going out for.',
                   style: TextStyle(
@@ -302,6 +282,45 @@ class _HeroHeader extends StatelessWidget {
                     height: 1.04,
                     fontWeight: FontWeight.w800,
                     letterSpacing: -1.8,
+                  ),
+                ),
+                const SizedBox(height: 18),
+                // Floating search: one frosted pill sitting on the photo,
+                // rather than an icon the user has to decode.
+                PressButton(
+                  semanticLabel: 'Search photo spots',
+                  onTap: () => Navigator.of(context).push(
+                    AppMotion.slideUp(const SearchScreen()),
+                  ),
+                  child: Container(
+                    height: 50,
+                    padding: const EdgeInsets.symmetric(horizontal: 16),
+                    decoration: BoxDecoration(
+                      color: const Color(0x1FFFFFFF),
+                      borderRadius: BorderRadius.circular(16),
+                      border: Border.all(color: AppColors.glassBorder),
+                    ),
+                    child: const Row(
+                      children: [
+                        Icon(
+                          Icons.search_rounded,
+                          color: AppColors.textSecondary,
+                          size: 20,
+                        ),
+                        SizedBox(width: 10),
+                        Expanded(
+                          child: Text(
+                            'Search spots, cities or views',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              color: AppColors.textSecondary,
+                              fontSize: 14,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
                 ),
               ],

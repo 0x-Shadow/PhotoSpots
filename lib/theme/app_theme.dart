@@ -7,20 +7,20 @@ import 'app_animations.dart';
 class AppColors {
   AppColors._();
 
-  static const background = Color(0xFF0A0A0B);
-  static const surface = Color(0xFF161618);
-  static const surfaceElevated = Color(0xFF1D1D20);
+  static const background = Color(0xFF08090B);
+  static const surface = Color(0xFF15171B);
+  static const surfaceElevated = Color(0xFF202329);
   static const hairline = Color(0x1AFFFFFF);
-  static const scrim = Color(0xF2161618);
+  static const scrim = Color(0xF215171B);
 
-  static const textPrimary = Color(0xFFFFFFFF);
-  static const textSecondary = Color(0xFF8E8E93);
-  static const textFaint = Color(0xFF5B5B60);
+  static const textPrimary = Color(0xFFF5F5F7);
+  static const textSecondary = Color(0xFF9298A3);
+  static const textFaint = Color(0xFF626873);
 
-  static const action = Color(0xFFFFFFFF);
-  static const onAction = Color(0xFF0A0A0B);
-  static const accent = Color(0xFF0A84FF);
-  static const accentSoft = Color(0x1F0A84FF);
+  static const action = Color(0xFFF5F5F7);
+  static const onAction = Color(0xFF08090B);
+  static const accent = Color(0xFF328AFF);
+  static const accentSoft = Color(0x29328AFF);
 
   /// Frosted surfaces. One material everywhere: nav bar, sheets, map chrome
   /// and auth. Keeping the tint neutral is what makes the glass read as glass
@@ -29,7 +29,7 @@ class AppColors {
   static const glassFillStrong = Color(0x24FFFFFF);
   static const glassBorder = Color(0x26FFFFFF);
   static const glassHighlight = Color(0x59FFFFFF);
-  static const glassScrim = Color(0xB30A0A0B);
+  static const glassScrim = Color(0xB308090B);
 
   static const star = Color(0xFFFFB84D);
   static const trending = Color(0xFFFF6B4A);
@@ -37,7 +37,7 @@ class AppColors {
   static const danger = Color(0xFFFF453A);
   static const success = Color(0xFF34C759);
 
-  static const mapBackground = Color(0xFF0A0A0B);
+  static const mapBackground = Color(0xFF08090B);
 
   static const catDate = Color(0xFFFF4D6D);
   static const catFriends = Color(0xFF7C6CFF);

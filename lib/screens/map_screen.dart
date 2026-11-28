@@ -1345,6 +1345,24 @@ class _PlaceCard extends StatelessWidget {
                       ),
                     ),
                   ),
+                  PressButton(
+                    semanticLabel: 'Directions to ${spot.title}',
+                    onTap: () => openDirections(context, spot),
+                    child: Container(
+                      width: 36,
+                      height: 36,
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        color: const Color(0x14FFFFFF),
+                        border: Border.all(color: AppColors.glassBorder),
+                      ),
+                      child: const Icon(
+                        Icons.near_me_rounded,
+                        color: AppColors.textPrimary,
+                        size: 17,
+                      ),
+                    ),
+                  ),
                   if (onClose != null)
                     PressButton(
                       semanticLabel: 'Close place card',

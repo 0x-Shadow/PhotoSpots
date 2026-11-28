@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:crypto/crypto.dart';
 import 'package:http/http.dart' as http;
 
 import '../app_info.dart';
@@ -15,6 +16,7 @@ class ReleaseInfo {
     required this.pageUrl,
     this.apkUrl,
     this.apkSize,
+    this.apkSha256,
   });
 
   /// Raw release tag, e.g. `v1.1.0`.
@@ -33,6 +35,10 @@ class ReleaseInfo {
 
   /// Declared size of [apkUrl] in bytes, used for the download progress bar.
   final int? apkSize;
+
+  /// SHA-256 published by GitHub for the APK asset, when available. The
+  /// downloaded file must match it before it is handed to the installer.
+  final String? apkSha256;
 
   bool get canSelfUpdate => apkUrl != null;
 }
@@ -79,6 +85,7 @@ class UpdateService {
         pageUrl: AppInfo.releasesPage,
         apkUrl: apk?.url,
         apkSize: apk?.size,
+        apkSha256: apk?.sha256,
       );
     } catch (_) {
       // Update checks are best effort and must never block startup.
@@ -106,9 +113,21 @@ class UpdateService {
       return _ApkAsset(
         url: parsed,
         size: asset['size'] as int?,
+        sha256: _parseSha256(asset['digest']),
       );
     }
     return null;
+  }
+
+  /// GitHub reports asset digests as `sha256:<64 hex chars>`. Anything else is
+  /// ignored rather than trusted.
+  static String? _parseSha256(Object? digest) {
+    if (digest is! String) return null;
+    final value = digest.trim().toLowerCase();
+    if (!value.startsWith('sha256:')) return null;
+    final hex = value.substring('sha256:'.length);
+    if (!RegExp(r'^[0-9a-f]{64}$').hasMatch(hex)) return null;
+    return hex;
   }
 
   static const int _maxApkBytes = 200 * 1024 * 1024;
@@ -146,6 +165,11 @@ class UpdateService {
       target.parent.createSync(recursive: true);
       sink = target.openWrite();
 
+      // Hash while streaming so a 60 MB package is never held in memory just
+      // to be verified.
+      final digestSink = _DigestSink();
+      final hasher = sha256.startChunkedConversion(digestSink);
+
       var received = 0;
       var lastReport = 0;
       await for (final chunk in response.stream) {
@@ -156,6 +180,7 @@ class UpdateService {
         if (received > _maxApkBytes) {
           throw const UpdateDownloadException('too-large');
         }
+        hasher.add(chunk);
         sink.add(chunk);
         if (onProgress != null &&
             (received - lastReport > 256 * 1024 ||
@@ -165,12 +190,19 @@ class UpdateService {
         }
       }
 
+      hasher.close();
       await sink.flush();
       await sink.close();
       sink = null;
 
       if (total != null && received != total) {
         throw const UpdateDownloadException('incomplete');
+      }
+
+      final expected = release.apkSha256;
+      final actual = digestSink.value?.toString();
+      if (expected != null && actual != expected) {
+        throw const UpdateDownloadException('checksum');
       }
 
       success = true;
@@ -231,10 +263,22 @@ class UpdateService {
 }
 
 class _ApkAsset {
-  const _ApkAsset({required this.url, required this.size});
+  const _ApkAsset({required this.url, required this.size, this.sha256});
 
   final Uri url;
   final int? size;
+  final String? sha256;
+}
+
+/// Captures the single digest produced by a chunked hash conversion.
+class _DigestSink implements Sink<Digest> {
+  Digest? value;
+
+  @override
+  void add(Digest data) => value = data;
+
+  @override
+  void close() {}
 }
 
 /// Failure of an in-app update download, carrying a stable [reason] code.

@@ -621,6 +621,12 @@ drop policy if exists "Photo owners can delete rows" on photos;
 create policy "Photo owners can delete rows"
   on photos for delete using ( auth.uid() = uploader );
 
+-- Same defence as comments: clients may only supply content columns. Row ids,
+-- created_at and any future moderation column stay server-owned.
+revoke insert, update on photos from anon, authenticated;
+grant insert (spot_id, uploader, image_url, caption, taken_at)
+  on photos to authenticated;
+
 drop policy if exists "Users can view own saves" on saves;
 create policy "Users can view own saves"
   on saves for select using ( auth.uid() = user_id );
@@ -754,7 +760,8 @@ create policy "Authenticated photo uploads"
 drop policy if exists "Photo owners can update" on storage.objects;
 create policy "Photo owners can update"
   on storage.objects for update to authenticated
-  using ( bucket_id = 'photos' and owner = auth.uid() );
+  using ( bucket_id = 'photos' and owner = auth.uid() )
+  with check ( bucket_id = 'photos' and owner = auth.uid() );
 
 drop policy if exists "Photo owners can delete" on storage.objects;
 create policy "Photo owners can delete"

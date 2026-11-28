@@ -203,7 +203,10 @@ class _NavBar extends StatefulWidget {
     ),
   ];
 
-  static const double barHeight = 64;
+  static const double barHeight = 76;
+
+  /// How far the Add button rises above the pill.
+  static const double addLift = 14;
 
   @override
   State<_NavBar> createState() => _NavBarState();
@@ -270,119 +273,144 @@ class _NavBarState extends State<_NavBar> with SingleTickerProviderStateMixin {
 
   @override
   Widget build(BuildContext context) {
+    const radius = BorderRadius.all(Radius.circular(_NavBar.barHeight / 2));
+
     return SafeArea(
       top: false,
-      minimum: const EdgeInsets.fromLTRB(18, 0, 18, 14),
+      minimum: const EdgeInsets.fromLTRB(16, 0, 16, 10),
       child: SizedBox(
-        height: _NavBar.barHeight,
+        height: _NavBar.barHeight + _NavBar.addLift,
         child: LayoutBuilder(
           builder: (context, constraints) {
             final slotWidth = constraints.maxWidth / _NavBar._items.length;
-            const radius = BorderRadius.all(
-              Radius.circular(_NavBar.barHeight / 2),
-            );
 
-            return Container(
-              decoration: const BoxDecoration(
-                borderRadius: radius,
-                boxShadow: [
-                  BoxShadow(
-                    color: Color(0x8C000000),
-                    blurRadius: 32,
-                    spreadRadius: -6,
-                    offset: Offset(0, 16),
-                  ),
-                ],
-              ),
-              child: ClipRRect(
-                borderRadius: radius,
-                child: BackdropFilter(
-                  filter: ui.ImageFilter.blur(sigmaX: 30, sigmaY: 30),
-                  child: DecoratedBox(
-                    decoration: BoxDecoration(
+            return Stack(
+              clipBehavior: Clip.none,
+              children: [
+                Positioned(
+                  left: 0,
+                  right: 0,
+                  bottom: 0,
+                  height: _NavBar.barHeight,
+                  child: Container(
+                    decoration: const BoxDecoration(
                       borderRadius: radius,
-                      gradient: const LinearGradient(
-                        begin: Alignment.topLeft,
-                        end: Alignment.bottomRight,
-                        colors: [Color(0x29FFFFFF), Color(0x0BFFFFFF)],
-                      ),
-                      border: Border.all(color: AppColors.glassBorder),
-                    ),
-                    child: Stack(
-                      children: [
-                        // Specular highlight: one thin line, brightest at the
-                        // centre, so the top edge catches light like real glass.
-                        Positioned(
-                          top: 0,
-                          left: 26,
-                          right: 26,
-                          child: Container(
-                            height: 1,
-                            decoration: const BoxDecoration(
-                              gradient: LinearGradient(
-                                colors: [
-                                  Color(0x00FFFFFF),
-                                  Color(0x59FFFFFF),
-                                  Color(0x00FFFFFF),
-                                ],
-                              ),
-                            ),
-                          ),
-                        ),
-                        // The moving active capsule. It glides between slots on
-                        // a spring, so switching tabs feels physical.
-                        Positioned.fill(
-                          child: IgnorePointer(
-                            child: AnimatedBuilder(
-                              animation: _slotAnimation,
-                              builder: (context, _) {
-                                final value = _slotAnimation.value
-                                    .clamp(0.0, 4.0)
-                                    .toDouble();
-                                return Padding(
-                                  padding: EdgeInsets.only(
-                                    left: value * slotWidth + 6,
-                                    right: (4 - value) * slotWidth + 6,
-                                    top: 7,
-                                    bottom: 7,
-                                  ),
-                                  child: const DecoratedBox(
-                                    decoration: BoxDecoration(
-                                      color: Color(0x1CFFFFFF),
-                                      borderRadius: BorderRadius.all(
-                                        Radius.circular(26),
-                                      ),
-                                      border: Border.fromBorderSide(
-                                        BorderSide(color: Color(0x1FFFFFFF)),
-                                      ),
-                                    ),
-                                  ),
-                                );
-                              },
-                            ),
-                          ),
-                        ),
-                        Row(
-                          children: [
-                            for (var i = 0; i < _NavBar._items.length; i++)
-                              Expanded(
-                                child: _NavBar._items[i] == null
-                                    ? _AddAction(onTap: () => _handleSlot(2))
-                                    : _NavItem(
-                                        icon: _NavBar._items[i]!.icon,
-                                        activeIcon: _NavBar._items[i]!.active,
-                                        label: _NavBar._items[i]!.label,
-                                        selected: widget.selectedSlot == i,
-                                        onTap: () => _handleSlot(i),
-                                      ),
-                              ),
-                          ],
+                      boxShadow: [
+                        BoxShadow(
+                          color: Color(0x8C000000),
+                          blurRadius: 32,
+                          spreadRadius: -6,
+                          offset: Offset(0, 16),
                         ),
                       ],
                     ),
+                    child: ClipRRect(
+                      borderRadius: radius,
+                      child: BackdropFilter(
+                        filter: ui.ImageFilter.blur(sigmaX: 30, sigmaY: 30),
+                        child: DecoratedBox(
+                          decoration: BoxDecoration(
+                            borderRadius: radius,
+                            gradient: const LinearGradient(
+                              begin: Alignment.topLeft,
+                              end: Alignment.bottomRight,
+                              colors: [Color(0x29FFFFFF), Color(0x0BFFFFFF)],
+                            ),
+                            border: Border.all(color: AppColors.glassBorder),
+                          ),
+                          child: Stack(
+                            children: [
+                              // Specular highlight: one thin line, brightest at
+                              // the centre, so the top edge catches light like
+                              // real glass.
+                              Positioned(
+                                top: 0,
+                                left: 26,
+                                right: 26,
+                                child: Container(
+                                  height: 1,
+                                  decoration: const BoxDecoration(
+                                    gradient: LinearGradient(
+                                      colors: [
+                                        Color(0x00FFFFFF),
+                                        Color(0x59FFFFFF),
+                                        Color(0x00FFFFFF),
+                                      ],
+                                    ),
+                                  ),
+                                ),
+                              ),
+                              // The moving active capsule. It glides between
+                              // slots on a spring, so switching tabs feels
+                              // physical.
+                              Positioned.fill(
+                                child: IgnorePointer(
+                                  child: AnimatedBuilder(
+                                    animation: _slotAnimation,
+                                    builder: (context, _) {
+                                      final value = _slotAnimation.value
+                                          .clamp(0.0, 4.0)
+                                          .toDouble();
+                                      return Padding(
+                                        padding: EdgeInsets.only(
+                                          left: value * slotWidth + 7,
+                                          right: (4 - value) * slotWidth + 7,
+                                          top: 8,
+                                          bottom: 8,
+                                        ),
+                                        child: const DecoratedBox(
+                                          decoration: BoxDecoration(
+                                            color: AppColors.accentSoft,
+                                            borderRadius: BorderRadius.all(
+                                              Radius.circular(26),
+                                            ),
+                                            border: Border.fromBorderSide(
+                                              BorderSide(
+                                                color: Color(0x66328AFF),
+                                              ),
+                                            ),
+                                          ),
+                                        ),
+                                      );
+                                    },
+                                  ),
+                                ),
+                              ),
+                              Row(
+                                children: [
+                                  for (var i = 0;
+                                      i < _NavBar._items.length;
+                                      i++)
+                                    Expanded(
+                                      child: _NavBar._items[i] == null
+                                          // The Add button floats above the
+                                          // pill, so its slot stays empty.
+                                          ? const SizedBox.shrink()
+                                          : _NavItem(
+                                              icon: _NavBar._items[i]!.icon,
+                                              activeIcon:
+                                                  _NavBar._items[i]!.active,
+                                              label: _NavBar._items[i]!.label,
+                                              selected:
+                                                  widget.selectedSlot == i,
+                                              onTap: () => _handleSlot(i),
+                                            ),
+                                    ),
+                                ],
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
                   ),
                 ),
-              ),
+                Positioned(
+                  left: slotWidth * 2.5 - 26,
+                  top: 0,
+                  child: _AddAction(onTap: () => _handleSlot(2)),
+                ),
+              ],
             );
           },
         ),
@@ -409,7 +437,7 @@ class _NavItem extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final reduceMotion = MediaQuery.disableAnimationsOf(context);
-    final color = selected ? AppColors.textPrimary : AppColors.textSecondary;
+    final color = selected ? AppColors.accent : AppColors.textSecondary;
 
     return Semantics(
       button: true,
@@ -432,16 +460,16 @@ class _NavItem extends StatelessWidget {
                   Icon(
                     selected ? activeIcon : icon,
                     color: color,
-                    size: 21.5 + 0.5 * t,
+                    size: 23 + 1.5 * t,
                   ),
-                  const SizedBox(height: 3),
+                  const SizedBox(height: 4),
                   Text(
                     label,
                     maxLines: 1,
                     style: TextStyle(
                       fontFamily: 'Inter',
                       color: color,
-                      fontSize: 10,
+                      fontSize: 10.5,
                       height: 1.1,
                       letterSpacing: 0.1,
                       fontWeight:
@@ -458,7 +486,10 @@ class _NavItem extends StatelessWidget {
   }
 }
 
-/// The always-available middle slot: one crisp white circle, dark glyph.
+/// The always-available Add action: one elevated blue circle, white glyph.
+///
+/// In the bar it sits in its own stack layer above the frosted pill so the
+/// circle can rise past the pill's clipped edge instead of being cut off.
 class _AddAction extends StatelessWidget {
   const _AddAction({required this.onTap});
 
@@ -469,29 +500,24 @@ class _AddAction extends StatelessWidget {
     return PressButton(
       semanticLabel: 'Add a spot',
       onTap: onTap,
-      child: SizedBox(
-        height: _NavBar.barHeight,
-        child: Center(
-          child: Container(
-            width: 44,
-            height: 44,
-            decoration: const BoxDecoration(
-              shape: BoxShape.circle,
-              color: AppColors.action,
-              boxShadow: [
-                BoxShadow(
-                  color: Color(0x40000000),
-                  blurRadius: 14,
-                  offset: Offset(0, 5),
-                ),
-              ],
+      child: Container(
+        width: 52,
+        height: 52,
+        decoration: const BoxDecoration(
+          shape: BoxShape.circle,
+          color: AppColors.accent,
+          boxShadow: [
+            BoxShadow(
+              color: Color(0x66328AFF),
+              blurRadius: 18,
+              offset: Offset(0, 6),
             ),
-            child: const Icon(
-              Icons.add_rounded,
-              color: AppColors.onAction,
-              size: 24,
-            ),
-          ),
+          ],
+        ),
+        child: const Icon(
+          Icons.add_rounded,
+          color: Colors.white,
+          size: 26,
         ),
       ),
     );
@@ -518,17 +544,17 @@ class _SideRail extends StatelessWidget {
       onDestinationSelected: (index) =>
           onSlotSelected(_slotForScreenIndex(index)),
       labelType: NavigationRailLabelType.all,
-      indicatorColor: const Color(0x1AFFFFFF),
+      indicatorColor: AppColors.accentSoft,
       selectedIconTheme: const IconThemeData(
-        color: AppColors.textPrimary,
-        size: 23,
+        color: AppColors.accent,
+        size: 24,
       ),
       unselectedIconTheme: const IconThemeData(
         color: AppColors.textFaint,
         size: 23,
       ),
       selectedLabelTextStyle: labelStyle.copyWith(
-        color: AppColors.textPrimary,
+        color: AppColors.accent,
         fontWeight: FontWeight.w700,
       ),
       unselectedLabelTextStyle: labelStyle.copyWith(color: AppColors.textFaint),

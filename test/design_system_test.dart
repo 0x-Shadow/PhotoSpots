@@ -6,8 +6,8 @@ import 'package:photospot/theme/app_typography.dart';
 
 void main() {
   test('accent is cool blue; amber is ratings only', () {
-    expect(AppColors.accent, const Color(0xFF0A84FF));
-    expect(AppColors.accentSoft, const Color(0x1F0A84FF));
+    expect(AppColors.accent, const Color(0xFF328AFF));
+    expect(AppColors.accentSoft, const Color(0x29328AFF));
     expect(AppColors.star, const Color(0xFFFFB84D));
   });
 
