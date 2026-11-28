@@ -46,6 +46,7 @@ class Spot {
     this.focalLength,
     this.tripodFriendly,
     this.accessNote,
+    this.isHidden = false,
   });
 
   final String id;
@@ -63,9 +64,14 @@ class Spot {
   final bool? tripodFriendly;
   final String? accessNote;
 
-  /// Community rating shown as ★ 4.9 (seed data until reviews ship).
+  /// Community rating. Only meaningful once [reviewCount] is above zero —
+  /// the UI never shows it for unreviewed spots.
   final double rating;
   final int reviewCount;
+
+  /// True when reports auto-hidden this spot from other people. The owner
+  /// still receives it (RLS) and can file an appeal from the spot menu.
+  final bool isHidden;
   final List<SpotPhoto> photos;
   final int saveCount;
   final int viewCount;
@@ -149,6 +155,7 @@ class Spot {
     String? focalLength,
     bool? tripodFriendly,
     String? accessNote,
+    bool? isHidden,
   }) {
     return Spot(
       id: id,
@@ -171,6 +178,7 @@ class Spot {
       focalLength: focalLength ?? this.focalLength,
       tripodFriendly: tripodFriendly ?? this.tripodFriendly,
       accessNote: accessNote ?? this.accessNote,
+      isHidden: isHidden ?? this.isHidden,
     );
   }
 
@@ -196,6 +204,7 @@ class Spot {
         'focalLength': focalLength,
         'tripodFriendly': tripodFriendly,
         'accessNote': accessNote,
+        'isHidden': isHidden,
         'photos': photos
             .map((p) => {
                   'id': p.id,
@@ -234,6 +243,7 @@ class Spot {
       focalLength: json['focalLength'] as String?,
       tripodFriendly: json['tripodFriendly'] as bool?,
       accessNote: json['accessNote'] as String?,
+      isHidden: json['isHidden'] as bool? ?? false,
       photos: rawPhotos
           .map((e) => Map<String, dynamic>.from(e as Map))
           .map(

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../app_info.dart';
 import '../services/update_service.dart';
 import '../state/settings_state.dart';
 import 'update_sheet.dart';
@@ -38,6 +39,12 @@ class _UpdateGateState extends State<UpdateGate> {
   Future<void> _checkForUpdate() async {
     if (_started) return;
     _started = true;
+
+    // Only builds that can actually act on an update check the channel: store
+    // builds receive updates from the store, and a launch-time prompt would
+    // otherwise send people to a GitHub page (or, on a fork, to somebody
+    // else's releases) on every cold start.
+    if (!AppInfo.enableSelfUpdate) return;
 
     SharedPreferences prefs;
     try {

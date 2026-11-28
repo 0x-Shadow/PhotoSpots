@@ -60,15 +60,24 @@ class Validators {
   /// Checks magic header bytes for JPEG, PNG, WebP, or ISO-BMFF (HEIC/HEIF)
   /// before uploading user bytes to public storage.
   static bool hasAllowedImageMagicBytes(Uint8List bytes) {
-    if (bytes.length < 12) return false;
+    return imageFormat(bytes) != ImageFormat.unknown;
+  }
+
+  /// Classifies image bytes from their magic header so upload metadata
+  /// (content type, file extension) always matches the real payload instead
+  /// of assuming every photo is a JPEG.
+  static ImageFormat imageFormat(Uint8List bytes) {
+    if (bytes.length < 12) return ImageFormat.unknown;
     // JPEG: FF D8 FF
-    if (bytes[0] == 0xFF && bytes[1] == 0xD8 && bytes[2] == 0xFF) return true;
+    if (bytes[0] == 0xFF && bytes[1] == 0xD8 && bytes[2] == 0xFF) {
+      return ImageFormat.jpeg;
+    }
     // PNG: 89 50 4E 47 0D 0A 1A 0A
     if (bytes[0] == 0x89 &&
         bytes[1] == 0x50 &&
         bytes[2] == 0x4E &&
         bytes[3] == 0x47) {
-      return true;
+      return ImageFormat.png;
     }
     // WebP: "RIFF"...."WEBP"
     if (bytes[0] == 0x52 &&
@@ -79,15 +88,40 @@ class Validators {
         bytes[9] == 0x45 &&
         bytes[10] == 0x42 &&
         bytes[11] == 0x50) {
-      return true;
+      return ImageFormat.webp;
     }
     // HEIC/HEIF: ...."ftyp"
     if (bytes[4] == 0x66 &&
         bytes[5] == 0x74 &&
         bytes[6] == 0x79 &&
         bytes[7] == 0x70) {
-      return true;
+      return ImageFormat.heic;
     }
-    return false;
+    return ImageFormat.unknown;
+  }
+
+  /// MIME type for [bytes], defaulting to JPEG for anything unrecognised.
+  /// Callers validate with [hasAllowedImageMagicBytes] first, so the default
+  /// is only ever reached for payloads the upload path already rejects.
+  static String imageContentType(Uint8List bytes) {
+    return switch (imageFormat(bytes)) {
+      ImageFormat.png => 'image/png',
+      ImageFormat.webp => 'image/webp',
+      ImageFormat.heic => 'image/heic',
+      ImageFormat.jpeg || ImageFormat.unknown => 'image/jpeg',
+    };
+  }
+
+  /// Storage extension matching [imageContentType].
+  static String imageExtension(Uint8List bytes) {
+    return switch (imageFormat(bytes)) {
+      ImageFormat.png => 'png',
+      ImageFormat.webp => 'webp',
+      ImageFormat.heic => 'heic',
+      ImageFormat.jpeg || ImageFormat.unknown => 'jpg',
+    };
   }
 }
+
+/// Image container formats the app accepts for upload.
+enum ImageFormat { jpeg, png, webp, heic, unknown }

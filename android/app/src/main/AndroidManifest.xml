@@ -15,8 +15,12 @@
     <uses-permission
         android:name="android.permission.WRITE_EXTERNAL_STORAGE"
         android:maxSdkVersion="29" />
-    <!-- Lets the in-app updater hand a downloaded release to the package installer. -->
-    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+    <!-- Lets the in-app updater hand a downloaded release to the package
+         installer. The name is a manifest placeholder: Play-safe builds (the
+         default) substitute an undefined no-op permission, and only builds
+         where Gradle sees ENABLE_SELF_UPDATE=true declare the real
+         REQUEST_INSTALL_PACKAGES permission (see android/app/build.gradle.kts). -->
+    <uses-permission android:name="${installPackagesPermission}" />
     <application
         android:label="PhotoSpot"
         android:name="${applicationName}"

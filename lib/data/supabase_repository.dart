@@ -78,9 +78,13 @@ class SupabaseSpotRepository implements SpotRepository {
   /// The profile join must be named explicitly: `spots` and `profiles` are
   /// linked both by submitted_by and through saves, so an unqualified
   /// `profiles(...)` embed fails with PGRST201 (ambiguous relationship).
+  ///
+  /// Photos are listed without `uploader`: the raw UUID is never needed by the
+  /// UI (own photos are labelled "You" at insert time) and shipping every
+  /// uploader id would let clients correlate a person's photos forever.
   static const _spotSelect = '''
     *,
-    photos (*),
+    photos (id, spot_id, image_url, caption, taken_at),
     profiles!spots_submitted_by_fkey (display_name, avatar_url)
   ''';
 
@@ -123,13 +127,18 @@ class SupabaseSpotRepository implements SpotRepository {
     }
   }
 
+  /// Upper bound for the initial feed pull. Large deployments should page
+  /// (this order/limit pair is the app's whole read for now), but 300 silently
+  /// starved the map of older spots, so the feed reads a wider window.
+  static const _feedSpotLimit = 1000;
+
   @override
   Future<List<Spot>> fetchSpots() async {
     final response = await _client
         .from('spots')
         .select(_spotSelect)
         .order('created_at', ascending: false)
-        .limit(300);
+        .limit(_feedSpotLimit);
 
     return (response as List)
         .map((row) => _spotFromRow(Map<String, dynamic>.from(row as Map)))
@@ -340,6 +349,20 @@ class SupabaseSpotRepository implements SpotRepository {
       if (details != null && details.trim().isNotEmpty)
         'details': details.trim(),
     });
+  }
+
+  @override
+  Future<bool> appealHiddenSpot(String spotId) async {
+    try {
+      await _client.rpc('appeal_hidden_content', params: {
+        'p_target_type': 'spot',
+        'p_target_id': spotId,
+      });
+      return true;
+    } catch (_) {
+      // Not hidden, cooldown active, or an older schema without the RPC.
+      return false;
+    }
   }
 
   @override
@@ -579,7 +602,9 @@ class SupabaseSpotRepository implements SpotRepository {
       id: row['id']?.toString() ?? '',
       url: row['image_url']?.toString() ?? photoUrl,
       caption: row['caption'] as String?,
-      uploadedBy: row['uploader']?.toString(),
+      // Only surface the uploader for the person who added the photo; other
+      // people's raw ids are not shown anywhere in the UI.
+      uploadedBy: row['uploader']?.toString() == userId ? 'You' : null,
       takenAt: row['taken_at'] != null
           ? DateTime.tryParse(row['taken_at'].toString())
           : null,
@@ -602,14 +627,19 @@ class SupabaseSpotRepository implements SpotRepository {
         'Unsupported image format. Please choose a JPEG, PNG, WebP, or HEIC photo.',
       );
     }
+    // Declare the real content type and extension of the payload: the bucket
+    // enforces an image MIME allowlist, and a PNG sent as image/jpeg would be
+    // stored with a lie baked into its metadata.
+    final contentType = Validators.imageContentType(bytes);
+    final extension = Validators.imageExtension(bytes);
     final fileName =
-        'spots/$userId/${DateTime.now().millisecondsSinceEpoch}.jpg';
+        'spots/$userId/${DateTime.now().millisecondsSinceEpoch}.$extension';
     await _client.storage
         .from('photos')
         .uploadBinary(
           fileName,
           bytes,
-          fileOptions: const FileOptions(contentType: 'image/jpeg'),
+          fileOptions: FileOptions(contentType: contentType),
         );
     final url = _client.storage.from('photos').getPublicUrl(fileName);
     if (!Validators.isSafeHttpsUrl(url)) {
@@ -656,8 +686,9 @@ class SupabaseSpotRepository implements SpotRepository {
       focalLength: row['focal_length'] as String?,
       tripodFriendly: row['tripod_friendly'] as bool?,
       accessNote: row['access_note'] as String?,
-      rating: (row['rating'] as num?)?.toDouble() ?? 4.5,
+      rating: (row['rating'] as num?)?.toDouble() ?? 0,
       reviewCount: (row['review_count'] as num?)?.toInt() ?? 0,
+      isHidden: (row['is_hidden'] as bool?) ?? false,
       photos: photos,
       saveCount: (row['save_count'] as num?)?.toInt() ?? 0,
       viewCount: (row['view_count'] as num?)?.toInt() ?? 0,

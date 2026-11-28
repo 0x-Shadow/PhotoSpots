@@ -22,8 +22,9 @@ everyone else can save it, plan around it, and get directions.
   automatically; a visitor tip, time of day, and tags are optional.
 - Respectful permissions: location is requested only when a person asks to use
   it or shares a place—not on app launch.
-- Run fully in demo mode, or connect Supabase for real community data, uploads,
-  saves, and anonymous publishing.
+- Run fully in demo mode, or connect Supabase for real community data, saves,
+  likes, and comments. Publishing a spot or photo requires a signed-in account;
+  browsing never does.
 
 ## Product principles
 
@@ -56,8 +57,8 @@ PhotoSpot should be useful in the moment and responsible over time:
 - [flutter_map](https://pub.dev/packages/flutter_map) with Esri's dark basemap,
   a CARTO option, and an OpenStreetMap fallback
 - `provider` for app state
-- [Supabase](https://supabase.com/) for production spots, storage, anonymous
-  sessions, email accounts, saves, comments, and server-owned counters
+- [Supabase](https://supabase.com/) for production spots, storage, email
+  accounts, saves, comments, and server-owned counters
 - `geolocator`, `image_picker`, and `url_launcher` for native capabilities
 
 ## Run locally
@@ -97,17 +98,26 @@ Set up the project before inviting real contributors:
 1. Create a Supabase project.
 2. Paste [`supabase_setup.sql`](supabase_setup.sql) into the SQL editor and run
    it. It is completely idempotent and can be re-run safely at any time.
-3. Enable **Anonymous sign-ins** under Authentication → Providers.
-4. Create a public storage bucket named `photos`.
+3. No auth provider changes are needed: the app never signs in anonymously.
+   Publishing, saving, and commenting require a normal email account, which
+   keeps every write attributable.
+4. The script creates the public `photos` storage bucket with an 8 MB per-file
+   limit, an image-only MIME allowlist, and a daily upload rate limit. To seed
+   the demo photos, set your project ref in the seed section of
+   [`supabase_setup.sql`](supabase_setup.sql) and upload the images to
+   `photos/seed/` first; leaving it null skips photo seeding.
 5. Confirm your Row Level Security policies before production. The included
    schema is the starting point—not a substitute for moderation and abuse
    controls.
 
 Counters, ratings, and review counts are server-owned: table-wide insert/update
 is revoked and only the columns a person may set are granted back, views are one
-row per viewer per spot, and photo uploads are limited to image extensions.
-Publishing uses an anonymous session so the app can attribute and secure each
-write without putting a login wall in front of a contribution.
+row per viewer per spot, and photo rows are limited by size, MIME type, and
+upload rate on both the client and the server. Other people can only see a
+profile's display name, avatar, and the content it contributed—bio and home
+city stay private to the owner. Report-based auto-hides need five distinct
+reporters, ignore self-reports, and can be contested by the owner through the
+`appeal_hidden_content` RPC, which logs an audit row in `moderation_appeals`.
 
 ## Permissions and privacy
 
@@ -118,7 +128,7 @@ write without putting a login wall in front of a contribution.
 | Photo library | Select a cover photo to share. | After choosing **Gallery**. |
 
 No permission is required to browse the app. Before store submission, publish a
-privacy policy explaining photo storage, anonymous identifiers, approximate vs.
+privacy policy explaining photo storage, device identifiers, approximate vs.
 exact location, retention, reporting, and account deletion.
 
 ## Release APK
@@ -138,6 +148,15 @@ flutter build apk --release \
   --dart-define=SUPABASE_ANON_KEY=YOUR-PUBLISHABLE-ANON-KEY
 ```
 
+`ENABLE_SELF_UPDATE=true` also has to be visible to Gradle as an environment
+variable (`ENABLE_SELF_UPDATE=true flutter build apk ...` on macOS/Linux,
+`$env:ENABLE_SELF_UPDATE="true"` on PowerShell) so the Android manifest
+declares `REQUEST_INSTALL_PACKAGES`. Without it the build stays Play-safe and
+never asks to install packages. Forks should also pass
+`--dart-define=GITHUB_REPO=your-name/your-repo` so update checks, release
+links, and the repository page point at your own repository instead of the
+upstream one.
+
 The APK is written to `build/app/outputs/flutter-apk/app-release.apk`.
 
 For GitHub Actions, configure these repository secrets:
@@ -156,8 +175,9 @@ to publish unless those checks pass.
 The code can produce a release APK today, but a public community app needs a
 few product and operational protections before submission:
 
-- Add reporting, blocking, and moderator review. Accounts exist, but there is
-  no moderation queue yet.
+- Add reporting, blocking, and moderator review. Accounts exist, and owners can
+  already appeal an automatic report-based hide (`moderation_appeals`), but
+  there is no moderator queue yet.
 - Add duplicate/place-quality checks and a way to correct a spot (owners can
   already delete their own spots and photos).
 - Add an option to blur or hide exact coordinates for sensitive locations.

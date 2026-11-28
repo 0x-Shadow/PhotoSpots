@@ -14,7 +14,13 @@ class AppInfo {
     defaultValue: '1.0.16',
   );
 
-  static const githubRepo = '0x-Shadow/PhotoSpots';
+  /// Repository that owns the release channel. Forks must override it at build
+  /// time (`--dart-define=GITHUB_REPO=your-name/your-repo`) so update prompts
+  /// and release links never point at someone else's APKs.
+  static const githubRepo = String.fromEnvironment(
+    'GITHUB_REPO',
+    defaultValue: '0x-Shadow/PhotoSpots',
+  );
 
   // ---- Backend ----
   // Both are supplied at build time. Empty values put the app into demo mode,

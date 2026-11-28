@@ -103,6 +103,9 @@ jobs:
           BUILD_NUMBER: ${{ github.run_number }}
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+          # Read by Gradle (not just the Dart define) so the manifest declares
+          # REQUEST_INSTALL_PACKAGES for this sideload build.
+          ENABLE_SELF_UPDATE: "true"
         run: |
           if [[ -z "$SUPABASE_URL" || -z "$SUPABASE_ANON_KEY" ]]; then
             echo "::warning::SUPABASE_URL / SUPABASE_ANON_KEY are not set; this build ships in demo mode (uploads are not shared)."

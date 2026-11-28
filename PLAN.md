@@ -30,7 +30,7 @@ list reveals, with reduced-motion support.
 
 ### Data
 `SpotRepository` with `MockSpotRepository` (12 Lisbon seed spots) and
-`SupabaseSpotRepository` (anonymous sessions, Postgres, Storage). Server-owned
+`SupabaseSpotRepository` (email auth, Postgres, Storage). Server-owned
 save/view counters via triggers. Saved IDs persist locally and sync to Supabase
 when a session exists.
 

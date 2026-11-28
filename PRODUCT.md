@@ -8,7 +8,7 @@ adaptive
 
 ## Stack
 
-Flutter 3.47 (single codebase: Android, iOS, web, macOS; one design language). Map: flutter_map + free Esri/OSM tiles (CARTO optional with a key). State: provider. Backend: repository pattern — `MockSpotRepository` seeded for demo mode; `SupabaseSpotRepository` (anonymous + email auth, Postgres, storage, server-owned counters) when build-time keys exist. Distance sorting is client-side; there is no PostGIS dependency. No paid map, image, or API services — user constraint, confirmed.
+Flutter 3.47 (single codebase: Android, iOS, web, macOS; one design language). Map: flutter_map + free Esri/OSM tiles (CARTO optional with a key). State: provider. Backend: repository pattern — `MockSpotRepository` seeded for demo mode; `SupabaseSpotRepository` (email auth, Postgres, storage, server-owned counters) when build-time keys exist. Distance sorting is client-side; there is no PostGIS dependency. No paid map, image, or API services — user constraint, confirmed.
 
 ## Users
 
@@ -34,7 +34,9 @@ Mobile-first, used outdoors and while walking. Photos are the product's proof: e
 - v1: map with viewport-culled photo pins (no clustering yet), spot detail (gallery, rank badge, tags, best-time), save/bookmark, saved list, three-step publish flow (photo → location → details), search + sort (near/top/most saved), algorithmic ranking.
 - Free stack only (confirmed hard constraint).
 - Location: real device location with a "when the user asks" permission model; a published photo's EXIF GPS places the pin automatically. The Lisbon seed is a fallback only when no fix has ever been cached.
-- Accounts: Supabase email/password and anonymous sessions are built. A build without keys runs a clearly labelled local-only demo profile.
+- Accounts: Supabase email/password auth (the app never creates anonymous
+  sessions); a build without keys runs a clearly labelled local-only demo
+  profile.
 
 ## Brand Commitments
 

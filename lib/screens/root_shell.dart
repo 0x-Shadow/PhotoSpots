@@ -1,7 +1,4 @@
-import 'dart:math' as math;
-
 import 'package:flutter/material.dart';
-import 'package:flutter/physics.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:provider/provider.dart';
 
@@ -193,12 +190,12 @@ class _Destination {
   final String label;
 }
 
-/// A floating liquid-glass navigation bar.
+/// A floating glass navigation bar.
 ///
 /// Everything lives on one piece of glass: Home, Map, the prominent Add in the
-/// centre, then Saved and Profile. The Add is a solid blue disc seated inside
-/// the capsule instead of a badge floating over a gap, so the bar is one
-/// uninterrupted surface and the middle action still carries the most weight.
+/// centre, then Saved and Profile. The selected destination sits in a calm
+/// blue capsule; every other item stays quiet, so the current tab and the Add
+/// action are the only two things that ask for attention.
 class _NavBar extends StatefulWidget {
   const _NavBar({required this.selectedSlot, required this.onSlotSelected});
 
@@ -232,11 +229,17 @@ class _NavBar extends StatefulWidget {
     ),
   ];
 
-  static const double barHeight = 72;
+  static const double barHeight = 68;
 
   /// The Add disc inside the capsule. Small enough to leave the glass visible
   /// around it, large enough to read as the bar's primary action.
-  static const double actionSize = 52;
+  static const double actionSize = 50;
+
+  /// Geometry of the active capsule that marks the selected destination.
+  static const double pillInset = 6;
+  static const double pillTop = 7;
+  static const double pillBottom = 7;
+  static const double pillRadius = 27;
 
   /// Destinations and the Add slot, in bar order.
   static const int slotCount = 5;
@@ -246,10 +249,7 @@ class _NavBar extends StatefulWidget {
   State<_NavBar> createState() => _NavBarState();
 }
 
-class _NavBarState extends State<_NavBar> with TickerProviderStateMixin {
-  late final AnimationController _springController;
-  late Animation<double> _slotAnimation;
-
+class _NavBarState extends State<_NavBar> with SingleTickerProviderStateMixin {
   /// The bar settles into place instead of popping in with the page.
   late final AnimationController _entranceController;
   late final Animation<double> _entrance;
@@ -257,10 +257,6 @@ class _NavBarState extends State<_NavBar> with TickerProviderStateMixin {
   @override
   void initState() {
     super.initState();
-    _springController = AnimationController.unbounded(vsync: this);
-    _slotAnimation = AlwaysStoppedAnimation(widget.selectedSlot.toDouble());
-    _springController.value = widget.selectedSlot.toDouble();
-
     _entranceController = AnimationController(
       vsync: this,
       duration: AppMotion.layout,
@@ -272,45 +268,13 @@ class _NavBarState extends State<_NavBar> with TickerProviderStateMixin {
     _entranceController.forward();
   }
 
-  void _animateToSlot(int slot) {
-    if (MediaQuery.disableAnimationsOf(context)) {
-      _springController.value = slot.toDouble();
-      return;
-    }
-    _slotAnimation = Tween<double>(
-      begin: _slotAnimation.value,
-      end: slot.toDouble(),
-    ).animate(_springController);
-    _springController.animateWith(
-      SpringSimulation(
-        const SpringDescription(mass: 1.0, stiffness: 280.0, damping: 23.0),
-        _springController.value,
-        slot.toDouble(),
-        0,
-      ),
-    );
-  }
-
-  @override
-  void didUpdateWidget(covariant _NavBar oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    if (oldWidget.selectedSlot != widget.selectedSlot) {
-      _animateToSlot(widget.selectedSlot);
-    }
-  }
-
   @override
   void dispose() {
-    _springController.dispose();
     _entranceController.dispose();
     super.dispose();
   }
 
-  void _handleSlot(int slot) {
-    // The Add slot opens the submit flow; the lens should stay where it is.
-    if (slot != _NavBar.addSlot) _animateToSlot(slot);
-    widget.onSlotSelected(slot);
-  }
+  void _handleSlot(int slot) => widget.onSlotSelected(slot);
 
   @override
   Widget build(BuildContext context) {
@@ -339,10 +303,10 @@ class _NavBarState extends State<_NavBar> with TickerProviderStateMixin {
             blur: 32,
             shadows: const [
               BoxShadow(
-                color: Color(0x8C000000),
-                blurRadius: 30,
-                spreadRadius: -6,
-                offset: Offset(0, 14),
+                color: Color(0x66000000),
+                blurRadius: 24,
+                spreadRadius: -8,
+                offset: Offset(0, 10),
               ),
             ],
             child: LayoutBuilder(
@@ -351,79 +315,41 @@ class _NavBarState extends State<_NavBar> with TickerProviderStateMixin {
 
                 return Stack(
                   children: [
-                    // Specular highlight: the top edge catches light like real
-                    // glass, brightest through the middle.
-                    Positioned(
-                      top: 0,
-                      left: 24,
-                      right: 24,
-                      child: Container(
-                        height: 1,
-                        decoration: const BoxDecoration(
-                          gradient: LinearGradient(
+                    // The active capsule glides between destinations on the
+                    // app's standard easing: one clear home for the selected
+                    // tab, no stretching, no travelling lens.
+                    AnimatedPositioned(
+                      duration: reduceMotion
+                          ? Duration.zero
+                          : AppMotion.layout,
+                      curve: AppMotion.easeOut,
+                      left: selectedSlot * slotWidth + _NavBar.pillInset,
+                      width: slotWidth - _NavBar.pillInset * 2,
+                      top: _NavBar.pillTop,
+                      bottom: _NavBar.pillBottom,
+                      child: DecoratedBox(
+                        decoration: BoxDecoration(
+                          borderRadius: BorderRadius.circular(
+                            _NavBar.pillRadius,
+                          ),
+                          gradient: const LinearGradient(
+                            begin: Alignment.topCenter,
+                            end: Alignment.bottomCenter,
                             colors: [
-                              Color(0x00FFFFFF),
-                              Color(0x59FFFFFF),
-                              Color(0x00FFFFFF),
+                              Color(0x59328AFF),
+                              Color(0x2E328AFF),
                             ],
                           ),
-                        ),
-                      ),
-                    ),
-                    // The active lens glides between destinations on a spring,
-                    // passing behind the Add disc at the centre. It stretches
-                    // along its travel axis with the spring's velocity and
-                    // settles back, the way liquid drags before it stops.
-                    Positioned.fill(
-                      child: IgnorePointer(
-                        child: AnimatedBuilder(
-                          animation: _slotAnimation,
-                          builder: (context, _) {
-                            final value = _slotAnimation.value
-                                .clamp(0.0, (_NavBar.slotCount - 1).toDouble())
-                                .toDouble();
-                            final stretch = reduceMotion
-                                ? 0.0
-                                : math.min(
-                                    _springController.velocity.abs() * 0.9,
-                                    9.0,
-                                  );
-                            return Stack(
-                              children: [
-                                Positioned(
-                                  left: value * slotWidth + 5 - stretch / 2,
-                                  top: 7,
-                                  bottom: 7,
-                                  width: slotWidth - 10 + stretch,
-                                  child: const DecoratedBox(
-                                    decoration: BoxDecoration(
-                                      borderRadius: BorderRadius.all(
-                                        Radius.circular(29),
-                                      ),
-                                      gradient: LinearGradient(
-                                        begin: Alignment.topCenter,
-                                        end: Alignment.bottomCenter,
-                                        colors: [
-                                          Color(0x40328AFF),
-                                          Color(0x14328AFF),
-                                        ],
-                                      ),
-                                      border: Border.fromBorderSide(
-                                        BorderSide(color: Color(0x33328AFF)),
-                                      ),
-                                      boxShadow: [
-                                        BoxShadow(
-                                          color: Color(0x38328AFF),
-                                          blurRadius: 18,
-                                          spreadRadius: -4,
-                                        ),
-                                      ],
-                                    ),
-                                  ),
-                                ),
-                              ],
-                            );
-                          },
+                          border: Border.all(
+                            color: const Color(0x66328AFF),
+                          ),
+                          boxShadow: const [
+                            BoxShadow(
+                              color: Color(0x40328AFF),
+                              blurRadius: 16,
+                              spreadRadius: -4,
+                            ),
+                          ],
                         ),
                       ),
                     ),
@@ -497,12 +423,12 @@ class _NavItem extends StatelessWidget {
                 : const Duration(milliseconds: 340),
             curve: Curves.easeOutCubic,
             builder: (context, t, _) {
-              // The icon arrives with a small overshoot and a lift, so the
-              // selection lands with weight instead of fading blue.
+              // Quiet grey by default, bright when selected. The capsule
+              // carries the state, so the item itself only gains light.
               final pop = reduceMotion ? 1.0 : Curves.easeOutBack.transform(t);
               final color = Color.lerp(
                 AppColors.textSecondary,
-                AppColors.accent,
+                AppColors.textPrimary,
                 t,
               )!;
 
@@ -512,15 +438,15 @@ class _NavItem extends StatelessWidget {
                   Transform.translate(
                     offset: Offset(0, -1.5 * t),
                     child: Transform.scale(
-                      scale: 1 + 0.13 * pop,
+                      scale: 1 + 0.08 * pop,
                       child: Icon(
                         selected ? activeIcon : icon,
                         color: color,
-                        size: 21,
+                        size: 22,
                       ),
                     ),
                   ),
-                  const SizedBox(height: 3),
+                  const SizedBox(height: 4),
                   Padding(
                     padding: const EdgeInsets.symmetric(horizontal: 2),
                     child: Text(
@@ -530,10 +456,11 @@ class _NavItem extends StatelessWidget {
                       style: TextStyle(
                         fontFamily: 'Inter',
                         color: color,
-                        fontSize: 10,
+                        fontSize: 10.5,
                         height: 1.1,
-                        letterSpacing: 0.1,
-                        fontWeight: FontWeight.w600,
+                        letterSpacing: 0.2,
+                        fontWeight:
+                            t > 0.5 ? FontWeight.w700 : FontWeight.w600,
                       ),
                     ),
                   ),
@@ -547,144 +474,56 @@ class _NavItem extends StatelessWidget {
   }
 }
 
-/// The prominent action: the app's white action treatment on a turning disc.
+/// The prominent action: the app's white action treatment on a clean disc.
 /// It sits in the centre slot on the same glass as the destinations, and the
 /// wide rail reuses it as its leading action.
-class _AddAction extends StatefulWidget {
+class _AddAction extends StatelessWidget {
   const _AddAction({required this.onTap, this.size = _NavBar.actionSize});
 
   final VoidCallback onTap;
   final double size;
 
   @override
-  State<_AddAction> createState() => _AddActionState();
-}
-
-class _AddActionState extends State<_AddAction>
-    with SingleTickerProviderStateMixin {
-  /// A single accent ripple that leaves the disc on tap — the bar's loudest
-  /// moment, kept to one ripple so nothing loops on screen.
-  late final AnimationController _ripple;
-
-  @override
-  void initState() {
-    super.initState();
-    _ripple = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 560),
-    );
-  }
-
-  @override
-  void dispose() {
-    _ripple.dispose();
-    super.dispose();
-  }
-
-  void _handleTap() {
-    if (!MediaQuery.disableAnimationsOf(context)) {
-      _ripple.forward(from: 0);
-    }
-    widget.onTap();
-  }
-
-  @override
   Widget build(BuildContext context) {
-    final size = widget.size;
-
     return SizedBox(
       width: size,
       height: size,
-      child: Stack(
-        clipBehavior: Clip.none,
-        alignment: Alignment.center,
-        children: [
-          IgnorePointer(
-            child: AnimatedBuilder(
-              animation: _ripple,
-              builder: (context, _) {
-                if (_ripple.value == 0) return const SizedBox.shrink();
-                final t = Curves.easeOutCubic.transform(_ripple.value);
-                return Transform.scale(
-                  scale: 1 + 0.35 * t,
-                  child: Container(
-                    width: size,
-                    height: size,
-                    decoration: BoxDecoration(
-                      shape: BoxShape.circle,
-                      color: AppColors.accent.withValues(alpha: 0.4 * (1 - t)),
-                    ),
-                  ),
-                );
-              },
+      child: PressButton(
+        semanticLabel: 'Add a spot',
+        onTap: onTap,
+        child: Container(
+          width: size,
+          height: size,
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            // Lit from above: the same light the capsule's rim catches.
+            gradient: const LinearGradient(
+              begin: Alignment.topCenter,
+              end: Alignment.bottomCenter,
+              colors: [Color(0xFFFFFFFF), Color(0xFFDFE2E8)],
             ),
-          ),
-          PressButton(
-            semanticLabel: 'Add a spot',
-            onTap: _handleTap,
-            child: Container(
-              width: size,
-              height: size,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                // Lit from above: the same light the capsule's rim catches.
-                gradient: const LinearGradient(
-                  begin: Alignment.topCenter,
-                  end: Alignment.bottomCenter,
-                  colors: [Color(0xFFFFFFFF), Color(0xFFDFE2E8)],
-                ),
-                border: Border.all(color: const Color(0x1F000000)),
-                boxShadow: const [
-                  BoxShadow(
-                    color: Color(0x73000000),
-                    blurRadius: 14,
-                    spreadRadius: -3,
-                    offset: Offset(0, 6),
-                  ),
-                  BoxShadow(
-                    color: Color(0x2E328AFF),
-                    blurRadius: 20,
-                    spreadRadius: -2,
-                    offset: Offset(0, 10),
-                  ),
-                ],
+            border: Border.all(color: const Color(0x1F000000)),
+            boxShadow: const [
+              BoxShadow(
+                color: Color(0x73000000),
+                blurRadius: 14,
+                spreadRadius: -3,
+                offset: Offset(0, 6),
               ),
-              child: Stack(
-                children: [
-                  // Gloss across the top half keeps the disc from reading flat.
-                  Positioned(
-                    top: 1,
-                    left: 1,
-                    right: 1,
-                    height: size * 0.5,
-                    child: DecoratedBox(
-                      decoration: BoxDecoration(
-                        borderRadius: BorderRadius.vertical(
-                          top: Radius.circular(size / 2),
-                        ),
-                        gradient: LinearGradient(
-                          begin: Alignment.topCenter,
-                          end: Alignment.bottomCenter,
-                          colors: [
-                            const Color(0xFFFFFFFF).withValues(alpha: 0.9),
-                            const Color(0x00FFFFFF),
-                          ],
-                        ),
-                      ),
-                    ),
-                  ),
-                  Center(
-                    child: Icon(
-                      Icons.add_rounded,
-                      color: AppColors.onAction,
-                      size: size * 0.48,
-                    ),
-                  ),
-                ],
+              BoxShadow(
+                color: Color(0x33328AFF),
+                blurRadius: 18,
+                spreadRadius: -2,
+                offset: Offset(0, 8),
               ),
-            ),
+            ],
           ),
-        ],
+          child: Icon(
+            Icons.add_rounded,
+            color: AppColors.onAction,
+            size: size * 0.48,
+          ),
+        ),
       ),
     );
   }

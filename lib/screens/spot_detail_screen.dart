@@ -436,23 +436,36 @@ class _RatingRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context).textTheme;
+    // Ratings only exist once real people leave them; never show a made-up
+    // number with a zero review count.
+    final hasReviews = spot.reviewCount > 0;
     return Row(
       children: [
         const Icon(Icons.star_rounded, color: AppColors.star, size: 18),
         const SizedBox(width: 4),
-        Text(
-          spot.rating.toStringAsFixed(1),
-          style: theme.titleSmall?.copyWith(color: AppColors.textPrimary),
-        ),
-        const SizedBox(width: 5),
-        Flexible(
-          child: Text(
-            '(${formatCount(spot.reviewCount)} reviews)',
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: theme.bodySmall,
+        if (hasReviews) ...[
+          Text(
+            spot.rating.toStringAsFixed(1),
+            style: theme.titleSmall?.copyWith(color: AppColors.textPrimary),
           ),
-        ),
+          const SizedBox(width: 5),
+          Flexible(
+            child: Text(
+              '(${formatCount(spot.reviewCount)} reviews)',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: theme.bodySmall,
+            ),
+          ),
+        ] else
+          Flexible(
+            child: Text(
+              'No reviews yet',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: theme.bodySmall,
+            ),
+          ),
         const Spacer(),
         Icon(Icons.near_me_rounded,
             color: hasFix ? AppColors.textSecondary : AppColors.textFaint,
@@ -754,6 +767,19 @@ class _SpotMoreButton extends StatelessWidget {
               authorId: spot.submittedById,
               authorName: spot.submittedBy,
             );
+          }
+          if (value == 'appeal') {
+            final ok = await app.appealHiddenSpot(spot.id);
+            if (!context.mounted) return;
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text(
+                  ok
+                      ? 'Appeal filed. The hidden content will be reviewed.'
+                      : 'No appeal available for this content.',
+                ),
+              ),
+            );
           } else if (value == 'block' && spot.submittedById != null) {
             await app.blockUser(spot.submittedById!);
             if (!context.mounted) return;
@@ -762,6 +788,7 @@ class _SpotMoreButton extends StatelessWidget {
               const SnackBar(content: Text('User blocked and spots hidden.')),
             );
           } else if (value == 'delete') {
+            if (!context.mounted) return;
             final confirm = await showDialog<bool>(
               context: context,
               builder: (dialogContext) => AlertDialog(
@@ -802,6 +829,11 @@ class _SpotMoreButton extends StatelessWidget {
         },
         itemBuilder: (_) => [
           if (isOwner) ...[
+            if (spot.isHidden)
+              const PopupMenuItem(
+                value: 'appeal',
+                child: Text('Appeal hide'),
+              ),
             const PopupMenuItem(
               value: 'edit',
               child: Text('Edit spot'),

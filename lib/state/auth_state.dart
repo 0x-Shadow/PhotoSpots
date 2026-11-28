@@ -166,33 +166,45 @@ class AuthState extends ChangeNotifier {
     final userId = _user?.id;
     if (client == null || userId == null || !isSignedIn) return;
     try {
-      final row = await client
-          .from('profiles')
-          .select('display_name, bio, city, avatar_url')
-          .eq('id', userId)
-          .maybeSingle();
-      if (row == null) return;
-      final remoteName = (row['display_name'] as String?)?.trim() ?? '';
-      final remoteBio = (row['bio'] as String?)?.trim() ?? '';
-      final remoteCity = (row['city'] as String?)?.trim() ?? '';
-      final remoteAvatar = (row['avatar_url'] as String?)?.trim();
-      if (remoteName.isNotEmpty) {
+      // bio and city are private: the profiles table only exposes id,
+      // display_name and avatar_url over PostgREST, so the owner reads their
+      // own private fields through the my_profile() RPC instead.
+      final remoteName = await _readRemoteName(client);
+      if (remoteName != null && remoteName.isNotEmpty) {
         _displayName = remoteName;
       }
-      if (remoteBio.isNotEmpty) {
-        _bio = remoteBio;
-      }
-      if (remoteCity.isNotEmpty) {
-        _city = remoteCity;
-      }
-      if (remoteAvatar != null && remoteAvatar.isNotEmpty) {
-        _avatarUrl = remoteAvatar;
+      try {
+        final rows = await client.rpc('my_profile');
+        if (rows is List && rows.isNotEmpty && rows.first is Map) {
+          final row = Map<String, dynamic>.from(rows.first as Map);
+          final bio = (row['bio'] as String?)?.trim() ?? '';
+          final city = (row['city'] as String?)?.trim() ?? '';
+          final avatar = (row['avatar_url'] as String?)?.trim();
+          if (bio.isNotEmpty) _bio = bio;
+          if (city.isNotEmpty) _city = city;
+          if (avatar != null && avatar.isNotEmpty) _avatarUrl = avatar;
+        }
+      } catch (_) {
+        // Older schema without my_profile(): public fields above still load.
       }
       await _writePrefs();
       _notify();
     } catch (_) {
       // Offline or unmigrated schema; keep local state.
     }
+  }
+
+  /// Reads the publicly visible half of the profile row.
+  Future<String?> _readRemoteName(sb.SupabaseClient client) async {
+    final row = await client
+        .from('profiles')
+        .select('display_name, avatar_url')
+        .eq('id', _user!.id)
+        .maybeSingle();
+    if (row == null) return null;
+    final avatar = (row['avatar_url'] as String?)?.trim();
+    if (avatar != null && avatar.isNotEmpty) _avatarUrl = avatar;
+    return (row['display_name'] as String?)?.trim();
   }
 
   /// Prefers the name saved on this device, then the auth metadata.
@@ -363,14 +375,17 @@ class AuthState extends ChangeNotifier {
       try {
         if (avatarBytes != null && avatarBytes.isNotEmpty) {
           final uploadBytes = _localAvatarBytes ?? avatarBytes;
+          final extension = Validators.imageExtension(uploadBytes);
           final path =
-              'avatars/${_user!.id}/${DateTime.now().millisecondsSinceEpoch}.jpg';
+              'avatars/${_user!.id}/${DateTime.now().millisecondsSinceEpoch}.$extension';
           await client.storage
               .from('photos')
               .uploadBinary(
                 path,
                 uploadBytes,
-                fileOptions: const sb.FileOptions(contentType: 'image/jpeg'),
+                fileOptions: sb.FileOptions(
+                  contentType: Validators.imageContentType(uploadBytes),
+                ),
               );
           _avatarUrl = client.storage.from('photos').getPublicUrl(path);
         }

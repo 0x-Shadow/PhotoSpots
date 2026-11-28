@@ -31,6 +31,19 @@ val hasReleaseSigning =
         releaseKeyAlias != null &&
         releaseKeyPassword != null
 
+// Sideload builds must declare REQUEST_INSTALL_PACKAGES so the updater can hand
+// a downloaded APK to the system installer; Google Play rejects apps that ship
+// it without that being core functionality. The manifest asks for a placeholder
+// name instead of the permission itself, and only self-update builds (Gradle
+// sees ENABLE_SELF_UPDATE=true as an environment variable or -P property)
+// substitute the real permission. Everyone else gets an undefined no-op
+// permission name, which Android ignores at install time.
+val selfUpdateEnabled =
+    listOf(
+        project.findProperty("ENABLE_SELF_UPDATE"),
+        System.getenv("ENABLE_SELF_UPDATE"),
+    ).any { it == "true" }
+
 android {
     namespace = "com.photospot.photospot"
     compileSdk = flutter.compileSdkVersion
@@ -52,6 +65,14 @@ android {
         // flag during build.
         versionCode = flutter.versionCode
         versionName = flutter.versionName
+        // Play-safe by default; real REQUEST_INSTALL_PACKAGES only for
+        // self-update builds (see selfUpdateEnabled above).
+        manifestPlaceholders["installPackagesPermission"] =
+            if (selfUpdateEnabled) {
+                "android.permission.REQUEST_INSTALL_PACKAGES"
+            } else {
+                "com.photospot.photospot.permission.NOTHING_INSTALL_PACKAGES"
+            }
     }
 
     signingConfigs {

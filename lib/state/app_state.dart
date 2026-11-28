@@ -800,6 +800,16 @@ class AppState extends ChangeNotifier {
     }
   }
 
+  /// Appeals a report-hidden spot. Returns whether the backend accepted the
+  /// appeal (owner-only, per-week cooldown, content unhidden server-side).
+  Future<bool> appealHiddenSpot(String spotId) async {
+    try {
+      return await _repo.appealHiddenSpot(spotId);
+    } catch (_) {
+      return false;
+    }
+  }
+
   /// Blocks a user so their spots and comments are immediately hidden.
   Future<void> blockUser(String userId) async {
     if (userId.isEmpty) return;

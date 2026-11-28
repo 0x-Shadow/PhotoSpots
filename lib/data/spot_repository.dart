@@ -75,6 +75,11 @@ abstract class SpotRepository {
     String? details,
   }) async {}
 
+  /// Asks the backend to un-hide content of [userId] that reports hid.
+  /// The security-definer RPC only succeeds for the real owner and applies a
+  /// per-week cooldown; returns false when the action is unavailable.
+  Future<bool> appealHiddenSpot(String spotId) async => false;
+
   /// Blocks or unblocks another user's content.
   Future<Set<String>?> fetchBlockedUserIds() async => null;
   Future<void> blockUser(String userId) async {}
@@ -286,6 +291,9 @@ class MockSpotRepository implements SpotRepository {
     required String reason,
     String? details,
   }) async {}
+
+  @override
+  Future<bool> appealHiddenSpot(String spotId) async => false;
 
   @override
   Future<Set<String>?> fetchBlockedUserIds() async => null;

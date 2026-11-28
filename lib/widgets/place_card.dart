@@ -79,8 +79,10 @@ class TrendingCard extends StatelessWidget {
                             ),
                             const SizedBox(width: 5),
                             Text(
-                              '${spot.rating.toStringAsFixed(1)} '
-                              '(${formatCount(spot.reviewCount)})',
+                              spot.reviewCount > 0
+                                  ? '${spot.rating.toStringAsFixed(1)} '
+                                      '(${formatCount(spot.reviewCount)})'
+                                  : 'New',
                               style: const TextStyle(
                                 color: Colors.white,
                                 fontSize: 12,
