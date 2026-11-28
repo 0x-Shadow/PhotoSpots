@@ -53,6 +53,7 @@ class HomeScreen extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 _CommunityBanner(
+                  live: state.realtimeConnected,
                   onTap: () => Navigator.of(context).push(
                     AppMotion.slideUp(
                       SpotListScreen(
@@ -385,9 +386,10 @@ class _SpotlightCarouselState extends State<_SpotlightCarousel> {
 }
 
 class _CommunityBanner extends StatelessWidget {
-  const _CommunityBanner({required this.onTap});
+  const _CommunityBanner({required this.onTap, this.live = false});
 
   final VoidCallback onTap;
+  final bool live;
 
   @override
   Widget build(BuildContext context) {
@@ -424,11 +426,11 @@ class _CommunityBanner extends StatelessWidget {
               ),
             ),
             const SizedBox(width: 12),
-            const Expanded(
+            Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(
+                  const Text(
                     'Places people actually recommend',
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
@@ -439,13 +441,36 @@ class _CommunityBanner extends StatelessWidget {
                       letterSpacing: -0.2,
                     ),
                   ),
-                  SizedBox(height: 3),
-                  Text(
-                    'Real spots. Real experiences.',
-                    style: TextStyle(
-                      color: AppColors.textSecondary,
-                      fontSize: 11.5,
-                    ),
+                  const SizedBox(height: 3),
+                  Row(
+                    children: [
+                      if (live) ...[
+                        const SizedBox(
+                          width: 5,
+                          height: 5,
+                          child: DecoratedBox(
+                            decoration: BoxDecoration(
+                              color: AppColors.success,
+                              shape: BoxShape.circle,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 5),
+                      ],
+                      Flexible(
+                        child: Text(
+                          live
+                              ? 'Live · ranked by saves, likes and comments'
+                              : 'Ranked by saves, likes and comments',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            color: AppColors.textSecondary,
+                            fontSize: 11.5,
+                          ),
+                        ),
+                      ),
+                    ],
                   ),
                 ],
               ),

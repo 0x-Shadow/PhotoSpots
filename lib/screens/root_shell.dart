@@ -1,4 +1,3 @@
-import 'dart:math' as math;
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
@@ -51,8 +50,6 @@ class _RootShellState extends State<RootShell> with TickerProviderStateMixin {
   late final AnimationController _tabController;
   late final Animation<double> _tabFade;
   late final Animation<double> _tabScale;
-  late final AnimationController _warmPulseController;
-  late final Animation<double> _warmPulse;
 
   static const _screens = <Widget>[
     HomeScreen(),
@@ -73,15 +70,7 @@ class _RootShellState extends State<RootShell> with TickerProviderStateMixin {
       parent: _tabController,
       curve: AppMotion.easeOut,
     );
-    _tabScale = Tween<double>(begin: 0.98, end: 1.0).animate(_tabFade);
-    _warmPulseController = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 650),
-    );
-    _warmPulse = CurvedAnimation(
-      parent: _warmPulseController,
-      curve: Curves.easeOutCubic,
-    );
+    _tabScale = Tween<double>(begin: 0.985, end: 1.0).animate(_tabFade);
     RootShell._tabOpener = _selectSlot;
   }
 
@@ -90,7 +79,7 @@ class _RootShellState extends State<RootShell> with TickerProviderStateMixin {
   }
 
   /// Handles a bar slot: Add opens the flow, the other slots switch tabs and
-  /// replay a short fade + lift plus a warm ambient light bloom.
+  /// replay a short fade + lift.
   void _selectSlot(int slot) {
     if (slot == 2) {
       _openSubmit();
@@ -102,10 +91,7 @@ class _RootShellState extends State<RootShell> with TickerProviderStateMixin {
       _index = index;
       _built.add(index);
     });
-    _tabController.forward(from: 0.35);
-    if (!MediaQuery.disableAnimationsOf(context)) {
-      _warmPulseController.forward(from: 0);
-    }
+    _tabController.forward(from: 0.4);
   }
 
   Widget _animatedScreen() {
@@ -129,7 +115,6 @@ class _RootShellState extends State<RootShell> with TickerProviderStateMixin {
   @override
   void dispose() {
     _tabController.dispose();
-    _warmPulseController.dispose();
     if (RootShell._tabOpener == _selectSlot) RootShell._tabOpener = null;
     super.dispose();
   }
@@ -177,28 +162,10 @@ class _RootShellState extends State<RootShell> with TickerProviderStateMixin {
 
         return Scaffold(
           backgroundColor: AppColors.background,
-          // Let the content continue behind the pill so the frosted material
-          // samples the actual page instead of an opaque scaffold gutter.
+          // Let the content continue behind the floating pill so the frosted
+          // material samples the actual page instead of an opaque gutter.
           extendBody: true,
-          body: Stack(
-            children: [
-              _animatedScreen(),
-              if (!MediaQuery.disableAnimationsOf(context))
-                Positioned(
-                  left: 0,
-                  right: 0,
-                  bottom: 0,
-                  height: 180,
-                  child: IgnorePointer(
-                    child: RepaintBoundary(
-                      child: CustomPaint(
-                        painter: _WarmPageGlowPainter(progress: _warmPulse),
-                      ),
-                    ),
-                  ),
-                ),
-            ],
-          ),
+          body: _animatedScreen(),
           bottomNavigationBar: _NavBar(
             selectedSlot: _slotForScreenIndex(_index),
             onSlotSelected: _selectSlot,
@@ -209,37 +176,11 @@ class _RootShellState extends State<RootShell> with TickerProviderStateMixin {
   }
 }
 
-/// Soft cool ambient bloom that rises from the floating glass when switching pages.
-class _WarmPageGlowPainter extends CustomPainter {
-  const _WarmPageGlowPainter({required this.progress});
-
-  final Animation<double> progress;
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final t = progress.value;
-    if (t <= 0 || t >= 1) return;
-    final intensity = math.sin(t * math.pi);
-    final center = Offset(size.width / 2, size.height + 20);
-    final paint = Paint()
-      ..shader = ui.Gradient.radial(
-        center,
-        size.width * 0.65,
-        [
-          const Color(0xFF57B6FF).withValues(alpha: 0.14 * intensity),
-          const Color(0xFF2D6CFF).withValues(alpha: 0.05 * intensity),
-          const Color(0xFF2D6CFF).withValues(alpha: 0.0),
-        ],
-        [0.0, 0.45, 1.0],
-      );
-    canvas.drawRect(Rect.fromLTWH(0, 0, size.width, size.height), paint);
-  }
-
-  @override
-  bool shouldRepaint(covariant _WarmPageGlowPainter oldDelegate) => true;
-}
-
-/// Floating rounded, genuinely blurred glass navigation bar.
+/// A floating liquid-glass navigation bar.
+///
+/// One neutral frosted slab, a hairline rim, a single specular highlight along
+/// the top edge, and a soft moving capsule for the active destination. No
+/// coloured bloom: the glass does the work and the content shows through it.
 class _NavBar extends StatefulWidget {
   const _NavBar({required this.selectedSlot, required this.onSlotSelected});
 
@@ -262,8 +203,7 @@ class _NavBar extends StatefulWidget {
     ),
   ];
 
-  /// Pill height floating above the bottom safe area.
-  static const double barHeight = 66;
+  static const double barHeight = 64;
 
   @override
   State<_NavBar> createState() => _NavBarState();
@@ -272,12 +212,10 @@ class _NavBar extends StatefulWidget {
 class _NavBarState extends State<_NavBar> with SingleTickerProviderStateMixin {
   late final AnimationController _springController;
   late Animation<double> _slotAnimation;
-  int _tappedSlot = 0;
 
   @override
   void initState() {
     super.initState();
-    _tappedSlot = widget.selectedSlot;
     _springController = AnimationController.unbounded(vsync: this);
     _slotAnimation = Tween<double>(
       begin: widget.selectedSlot.toDouble(),
@@ -293,18 +231,18 @@ class _NavBarState extends State<_NavBar> with SingleTickerProviderStateMixin {
     }
     final from = _slotAnimation.value;
     final to = slot.toDouble();
-    _tappedSlot = slot;
     _slotAnimation = Tween<double>(
       begin: from,
       end: to,
     ).animate(_springController);
-    final simulation = SpringSimulation(
-      const SpringDescription(mass: 1.0, stiffness: 210.0, damping: 17.0),
-      _springController.value,
-      to,
-      0,
+    _springController.animateWith(
+      SpringSimulation(
+        const SpringDescription(mass: 1.0, stiffness: 240.0, damping: 24.0),
+        _springController.value,
+        to,
+        0,
+      ),
     );
-    _springController.animateWith(simulation);
   }
 
   @override
@@ -322,228 +260,134 @@ class _NavBarState extends State<_NavBar> with SingleTickerProviderStateMixin {
   }
 
   void _handleSlot(int slot) {
+    if (slot == 2) {
+      widget.onSlotSelected(2);
+      return;
+    }
     _animateToSlot(slot);
     widget.onSlotSelected(slot);
   }
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(18, 0, 18, 12),
+    return SafeArea(
+      top: false,
+      minimum: const EdgeInsets.fromLTRB(18, 0, 18, 14),
       child: SizedBox(
         height: _NavBar.barHeight,
-        child: Stack(
-          clipBehavior: Clip.none,
-          children: [
-            Positioned.fill(
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            final slotWidth = constraints.maxWidth / _NavBar._items.length;
+            const radius = BorderRadius.all(
+              Radius.circular(_NavBar.barHeight / 2),
+            );
+
+            return Container(
+              decoration: const BoxDecoration(
+                borderRadius: radius,
+                boxShadow: [
+                  BoxShadow(
+                    color: Color(0x8C000000),
+                    blurRadius: 32,
+                    spreadRadius: -6,
+                    offset: Offset(0, 16),
+                  ),
+                ],
+              ),
               child: ClipRRect(
-                borderRadius: BorderRadius.circular(_NavBar.barHeight / 2),
+                borderRadius: radius,
                 child: BackdropFilter(
-                  filter: ui.ImageFilter.blur(sigmaX: 18, sigmaY: 18),
-                  child: RepaintBoundary(
-                    child: CustomPaint(
-                      painter: _GlassBarPainter(
-                        slotAnimation: _slotAnimation,
-                        springValue: _springController,
-                        tappedSlot: _tappedSlot,
-                        slotCount: _NavBar._items.length,
+                  filter: ui.ImageFilter.blur(sigmaX: 30, sigmaY: 30),
+                  child: DecoratedBox(
+                    decoration: BoxDecoration(
+                      borderRadius: radius,
+                      gradient: const LinearGradient(
+                        begin: Alignment.topLeft,
+                        end: Alignment.bottomRight,
+                        colors: [Color(0x29FFFFFF), Color(0x0BFFFFFF)],
                       ),
+                      border: Border.all(color: AppColors.glassBorder),
+                    ),
+                    child: Stack(
+                      children: [
+                        // Specular highlight: one thin line, brightest at the
+                        // centre, so the top edge catches light like real glass.
+                        Positioned(
+                          top: 0,
+                          left: 26,
+                          right: 26,
+                          child: Container(
+                            height: 1,
+                            decoration: const BoxDecoration(
+                              gradient: LinearGradient(
+                                colors: [
+                                  Color(0x00FFFFFF),
+                                  Color(0x59FFFFFF),
+                                  Color(0x00FFFFFF),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ),
+                        // The moving active capsule. It glides between slots on
+                        // a spring, so switching tabs feels physical.
+                        Positioned.fill(
+                          child: IgnorePointer(
+                            child: AnimatedBuilder(
+                              animation: _slotAnimation,
+                              builder: (context, _) {
+                                final value = _slotAnimation.value
+                                    .clamp(0.0, 4.0)
+                                    .toDouble();
+                                return Padding(
+                                  padding: EdgeInsets.only(
+                                    left: value * slotWidth + 6,
+                                    right: (4 - value) * slotWidth + 6,
+                                    top: 7,
+                                    bottom: 7,
+                                  ),
+                                  child: const DecoratedBox(
+                                    decoration: BoxDecoration(
+                                      color: Color(0x1CFFFFFF),
+                                      borderRadius: BorderRadius.all(
+                                        Radius.circular(26),
+                                      ),
+                                      border: Border.fromBorderSide(
+                                        BorderSide(color: Color(0x1FFFFFFF)),
+                                      ),
+                                    ),
+                                  ),
+                                );
+                              },
+                            ),
+                          ),
+                        ),
+                        Row(
+                          children: [
+                            for (var i = 0; i < _NavBar._items.length; i++)
+                              Expanded(
+                                child: _NavBar._items[i] == null
+                                    ? _AddAction(onTap: () => _handleSlot(2))
+                                    : _NavItem(
+                                        icon: _NavBar._items[i]!.icon,
+                                        activeIcon: _NavBar._items[i]!.active,
+                                        label: _NavBar._items[i]!.label,
+                                        selected: widget.selectedSlot == i,
+                                        onTap: () => _handleSlot(i),
+                                      ),
+                              ),
+                          ],
+                        ),
+                      ],
                     ),
                   ),
                 ),
               ),
-            ),
-            Row(
-              children: [
-                for (var i = 0; i < _NavBar._items.length; i++)
-                  Expanded(
-                    child: _NavBar._items[i] == null
-                        ? _AddAction(onTap: () => _handleSlot(2))
-                        : _NavItem(
-                            icon: _NavBar._items[i]!.icon,
-                            activeIcon: _NavBar._items[i]!.active,
-                            label: _NavBar._items[i]!.label,
-                            selected: widget.selectedSlot == i,
-                            onTap: () => _handleSlot(i),
-                          ),
-                  ),
-              ],
-            ),
-          ],
+            );
+          },
         ),
       ),
     );
-  }
-}
-
-class _GlassBarPainter extends CustomPainter {
-  _GlassBarPainter({
-    required this.slotAnimation,
-    required this.springValue,
-    required this.tappedSlot,
-    required this.slotCount,
-  }) : super(repaint: slotAnimation);
-
-  final Animation<double> slotAnimation;
-  final AnimationController springValue;
-  final int tappedSlot;
-  final int slotCount;
-
-  static const _liquidTop = Color(0xFFA9E4FF);
-  static const _liquidMid = Color(0xFF57B6FF);
-  static const _liquidDeep = Color(0xFF2D6CFF);
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final width = size.width;
-    final height = size.height;
-    final slotWidth = width / slotCount;
-    final rect = Offset.zero & size;
-    final rrect = RRect.fromRectAndRadius(rect, const Radius.circular(31));
-
-    // 1. Floating shadow gives the material a clear edge above the content.
-    final shadowPaint = Paint()
-      ..color = const Color(0x99000000)
-      ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 12);
-    canvas.save();
-    canvas.translate(0, 7);
-    canvas.drawRRect(rrect, shadowPaint);
-    canvas.restore();
-
-    // 2. A translucent layer over a real BackdropFilter creates the frosted
-    // glass instead of imitating blur with a solid painted background.
-    final glassPaint = Paint()
-      ..shader = ui.Gradient.linear(Offset(0, 0), Offset(0, height), const [
-        Color(0xB81E2330),
-        Color(0xA0101119),
-      ]);
-    canvas.drawRRect(rrect, glassPaint);
-
-    // Subtle top sheen
-    final sheenPaint = Paint()
-      ..shader = ui.Gradient.linear(Offset(0, 0), Offset(0, height * 0.65), [
-        Colors.white.withValues(alpha: 0.07),
-        Colors.white.withValues(alpha: 0.0),
-      ]);
-    canvas.drawRRect(rrect, sheenPaint);
-
-    // 3. Cool liquid light follows the selected destination.
-    final activeX = (slotAnimation.value + 0.5) * slotWidth;
-    final centerY = height / 2;
-    final pulseT = springValue.value.clamp(0.0, 1.0);
-    final pulseBoost = (1.0 - pulseT) * 0.22;
-
-    canvas.save();
-    canvas.clipRRect(rrect);
-    final glowPaint = Paint()
-      ..shader = ui.Gradient.radial(
-        Offset(activeX, centerY + 2),
-        slotWidth * 0.78,
-        [
-          _liquidTop.withValues(alpha: 0.28 + pulseBoost),
-          _liquidMid.withValues(alpha: 0.12 + pulseBoost * 0.5),
-          _liquidDeep.withValues(alpha: 0.0),
-        ],
-        [0.0, 0.45, 1.0],
-      );
-
-    // The add control stays quietly discoverable without competing with the
-    // selected-tab indicator.
-    final addCenterX = 2.5 * slotWidth;
-    final addGlowPaint = Paint()
-      ..shader = ui.Gradient.radial(
-        Offset(addCenterX, centerY),
-        slotWidth * 0.65,
-        [
-          _liquidMid.withValues(alpha: 0.16),
-          _liquidDeep.withValues(alpha: 0.0),
-        ],
-        [0.0, 1.0],
-      );
-
-    canvas.drawCircle(
-      Offset(activeX, centerY + 2),
-      slotWidth * 0.78,
-      glowPaint,
-    );
-    canvas.drawCircle(
-      Offset(addCenterX, centerY),
-      slotWidth * 0.65,
-      addGlowPaint,
-    );
-
-    // Expanding liquid tap ripple.
-    if (pulseT > 0 && pulseT < 1) {
-      final tappedX = (tappedSlot + 0.5) * slotWidth;
-      final rippleRadius = 8.0 + pulseT * (slotWidth * 0.65);
-      final ripplePaint = Paint()
-        ..style = PaintingStyle.fill
-        ..color = _liquidTop.withValues(alpha: (1.0 - pulseT) * 0.2);
-      canvas.drawCircle(Offset(tappedX, centerY), rippleRadius, ripplePaint);
-    }
-    canvas.restore();
-
-    // 4. Active tab capsule with a softly refracted rim.
-    final capsuleLeft = slotAnimation.value * slotWidth + 5.0;
-    final capsuleRect = Rect.fromLTWH(
-      capsuleLeft,
-      5.0,
-      slotWidth - 10.0,
-      height - 10.0,
-    );
-    final capsuleRRect = RRect.fromRectAndRadius(
-      capsuleRect,
-      const Radius.circular(26),
-    );
-
-    final capsuleFill = Paint()..color = _liquidTop.withValues(alpha: 0.10);
-    canvas.drawRRect(capsuleRRect, capsuleFill);
-
-    final rimGlowPaint = Paint()
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 3.2
-      ..color = _liquidMid.withValues(alpha: 0.24)
-      ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 3);
-    canvas.drawRRect(capsuleRRect, rimGlowPaint);
-
-    final rimPaint = Paint()
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 1.35
-      ..shader = ui.Gradient.linear(
-        Offset(capsuleLeft, 0),
-        Offset(capsuleLeft + capsuleRect.width, 0),
-        [
-          _liquidTop.withValues(alpha: 0.05),
-          _liquidTop.withValues(alpha: 0.78),
-          _liquidMid.withValues(alpha: 0.9),
-          _liquidTop.withValues(alpha: 0.05),
-        ],
-        [0.0, 0.28, 0.72, 1.0],
-      );
-    canvas.drawRRect(capsuleRRect, rimPaint);
-
-    // 5. Outer glass border (bright specular highlight at top fading down)
-    final borderPaint = Paint()
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 1.25
-      ..shader = ui.Gradient.linear(
-        Offset(0, 0),
-        Offset(0, height),
-        [
-          Colors.white.withValues(alpha: 0.48),
-          Colors.white.withValues(alpha: 0.14),
-          Colors.white.withValues(alpha: 0.07),
-        ],
-        [0.0, 0.5, 1.0],
-      );
-    canvas.drawRRect(rrect.deflate(0.6), borderPaint);
-  }
-
-  @override
-  bool shouldRepaint(covariant _GlassBarPainter oldDelegate) {
-    return oldDelegate.tappedSlot != tappedSlot ||
-        oldDelegate.slotAnimation != slotAnimation ||
-        oldDelegate.springValue != springValue;
   }
 }
 
@@ -565,7 +409,8 @@ class _NavItem extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final reduceMotion = MediaQuery.disableAnimationsOf(context);
-    final color = selected ? const Color(0xFFA9E4FF) : AppColors.textSecondary;
+    final color = selected ? AppColors.textPrimary : AppColors.textSecondary;
+
     return Semantics(
       button: true,
       selected: selected,
@@ -578,46 +423,32 @@ class _NavItem extends StatelessWidget {
             tween: Tween<double>(begin: 0, end: selected ? 1 : 0),
             duration: reduceMotion
                 ? Duration.zero
-                : const Duration(milliseconds: 260),
-            curve: Curves.easeOutBack,
+                : const Duration(milliseconds: 280),
+            curve: Curves.easeOutCubic,
             builder: (context, t, _) {
-              final scale = 1.0 + 0.12 * math.sin(t * math.pi);
-              return Transform.scale(
-                scale: reduceMotion ? 1.0 : scale,
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Icon(
-                      selected ? activeIcon : icon,
+              return Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(
+                    selected ? activeIcon : icon,
+                    color: color,
+                    size: 21.5 + 0.5 * t,
+                  ),
+                  const SizedBox(height: 3),
+                  Text(
+                    label,
+                    maxLines: 1,
+                    style: TextStyle(
+                      fontFamily: 'Inter',
                       color: color,
-                      size: 21.5,
-                      shadows: selected && !reduceMotion
-                          ? [
-                              Shadow(
-                                color: const Color(0xFF57B6FF)
-                                    .withValues(alpha: 0.65 * t),
-                                blurRadius: 9,
-                              ),
-                            ]
-                          : null,
+                      fontSize: 10,
+                      height: 1.1,
+                      letterSpacing: 0.1,
+                      fontWeight:
+                          selected ? FontWeight.w700 : FontWeight.w500,
                     ),
-                    const SizedBox(height: 3),
-                    Text(
-                      label,
-                      maxLines: 1,
-                      style: TextStyle(
-                        fontFamily: 'Inter',
-                        color: color,
-                        fontSize: 10,
-                        height: 1.1,
-                        letterSpacing: 0.1,
-                        fontWeight: selected
-                            ? FontWeight.w700
-                            : FontWeight.w500,
-                      ),
-                    ),
-                  ],
-                ),
+                  ),
+                ],
               );
             },
           ),
@@ -627,7 +458,7 @@ class _NavItem extends StatelessWidget {
   }
 }
 
-/// The always-available middle slot with a refracted liquid-glass orb.
+/// The always-available middle slot: one crisp white circle, dark glyph.
 class _AddAction extends StatelessWidget {
   const _AddAction({required this.onTap});
 
@@ -642,31 +473,23 @@ class _AddAction extends StatelessWidget {
         height: _NavBar.barHeight,
         child: Center(
           child: Container(
-            width: 46,
-            height: 46,
-            decoration: BoxDecoration(
+            width: 44,
+            height: 44,
+            decoration: const BoxDecoration(
               shape: BoxShape.circle,
-              gradient: const LinearGradient(
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-                colors: [Color(0xFFA9E4FF), Color(0xFF57B6FF)],
-              ),
-              border: Border.all(
-                color: Colors.white.withValues(alpha: 0.45),
-                width: 1.2,
-              ),
-              boxShadow: const [
+              color: AppColors.action,
+              boxShadow: [
                 BoxShadow(
-                  color: Color(0x6657B6FF),
-                  blurRadius: 12,
-                  offset: Offset(0, 4),
+                  color: Color(0x40000000),
+                  blurRadius: 14,
+                  offset: Offset(0, 5),
                 ),
               ],
             ),
             child: const Icon(
               Icons.add_rounded,
-              color: Color(0xFF07111E),
-              size: 25,
+              color: AppColors.onAction,
+              size: 24,
             ),
           ),
         ),

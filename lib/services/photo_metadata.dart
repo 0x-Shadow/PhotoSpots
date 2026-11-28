@@ -75,7 +75,107 @@ class PhotoMetadata {
 
     // HEIC/HEIF, and any JPEG/PNG whose segment layout surprised us: the Exif
     // payload always carries its own header, so search for it wherever it is.
-    return _scanForExif(bytes);
+    final scanned = _scanForExif(bytes);
+    if (scanned != null) return scanned;
+
+    // Some containers carry a bare TIFF block with no `Exif\0\0` header (or
+    // an item offset we cannot follow). Only worth scanning when the file is
+    // not one of the formats already handled above, so a JPEG with no GPS
+    // cannot be misread from random image bytes.
+    final handled = (bytes.length > 1 && bytes[0] == 0xFF && bytes[1] == 0xD8) ||
+        _isPng(bytes) ||
+        _isWebp(bytes);
+    if (!handled) {
+      final tiff = _scanForTiffHeader(bytes);
+      if (tiff != null) return tiff;
+    }
+
+    // Last resort: XMP. Editors and some galleries keep GPS in the XMP packet
+    // after stripping the EXIF block, which is why the same file can show a
+    // location in other photo apps but not here.
+    return _scanForXmpGps(bytes);
+  }
+
+  /// Searches the buffer for a bare TIFF header (`II*\0` or `MM\0*`) and
+  /// parses the GPS block that follows. Used for HEIC/HEIF/AVIF variants whose
+  /// Exif item layout does not start with an `Exif\0\0` signature.
+  static PhotoLocation? _scanForTiffHeader(Uint8List bytes) {
+    final end = math.min(bytes.length, _scanLimit) - 4;
+    for (var i = 0; i <= end; i++) {
+      final first = bytes[i];
+      if (first != 0x49 && first != 0x4D) continue; // 'I' or 'M'
+      if (bytes[i + 1] != first) continue;
+      final valid = first == 0x49
+          ? bytes[i + 2] == 0x2A && bytes[i + 3] == 0x00
+          : bytes[i + 2] == 0x00 && bytes[i + 3] == 0x2A;
+      if (!valid) continue;
+      final location = _readTiff(Uint8List.sublistView(bytes, i));
+      if (location != null) return location;
+    }
+    return null;
+  }
+
+  /// Reads `GPSLatitude` / `GPSLongitude` from an XMP packet, e.g.
+  /// `exif:GPSLatitude="38,43.12N"`. Returns null unless both axes parse.
+  static PhotoLocation? _scanForXmpGps(Uint8List bytes) {
+    // XMP lives near the start of the file even in large photos; a 1 MB window
+    // keeps the fallback cheap.
+    final end = math.min(bytes.length, 1 << 20);
+    final text = String.fromCharCodes(bytes.sublist(0, end));
+    final lat = _xmpCoordinate(text, 'GPSLatitude');
+    final lng = _xmpCoordinate(text, 'GPSLongitude');
+    if (lat == null || lng == null) return null;
+    if (lat.abs() > 90 || lng.abs() > 180) return null;
+    if (lat == 0 && lng == 0) return null;
+    return PhotoLocation(latitude: lat, longitude: lng);
+  }
+
+  // Degrees use a dot decimal; the comma is the DMS separator, so it must not
+  // be swallowed by the degrees group (`38,43.12N` is 38° 43.12′).
+  static final _xmpPattern = RegExp(
+    r'''^[^0-9+-]{0,6}(-?[0-9]{1,3}(?:\.[0-9]+)?)'''
+    r'''(?:[,\s]+([0-9]{1,2}(?:\.[0-9]+)?))?'''
+    r'''(?:[,\s]+([0-9]{1,2}(?:\.[0-9]+)?))?'''
+    r'''\s*([NSEW])?''',
+  );
+
+  static double? _xmpCoordinate(String text, String tag) {
+    var index = text.indexOf(tag);
+    var attempts = 0;
+    while (index != -1 && attempts < 6) {
+      attempts++;
+      final start = index + tag.length;
+      // Skip `GPSLatitudeRef` and similar tags that merely start with the name.
+      if (start < text.length) {
+        final next = text.codeUnitAt(start);
+        final isLetter = (next >= 0x41 && next <= 0x5A) ||
+            (next >= 0x61 && next <= 0x7A);
+        if (isLetter) {
+          index = text.indexOf(tag, start);
+          continue;
+        }
+      }
+      final slice = text.substring(
+        start,
+        math.min(text.length, start + 90),
+      );
+      final match = _xmpPattern.firstMatch(slice);
+      if (match != null) {
+        double parse(String? value) =>
+            double.tryParse((value ?? '0').replaceAll(',', '.')) ?? 0;
+        final degrees = parse(match.group(1));
+        final minutes = parse(match.group(2));
+        final seconds = parse(match.group(3));
+        final sign = degrees < 0 ? -1.0 : 1.0;
+        var value = sign *
+            (degrees.abs() + minutes / 60 + seconds / 3600);
+        final ref = match.group(4);
+        if (ref == 'S' || ref == 'W') value = -value.abs();
+        if (value != 0) return value;
+      }
+      index = text.indexOf(tag, start);
+    }
+    return null;
   }
 
   // ---------------------------------------------------------------------------

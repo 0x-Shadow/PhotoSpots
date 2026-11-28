@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:math' as math;
+import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
@@ -20,6 +21,7 @@ import '../utils/format.dart';
 import '../utils/navigation.dart';
 import '../utils/ranking.dart';
 import '../utils/share.dart';
+import '../widgets/glass.dart';
 import '../widgets/map_pin.dart';
 import '../widgets/spot_image.dart';
 
@@ -609,7 +611,7 @@ class _MapScreenState extends State<MapScreen> {
           ),
         ),
 
-        // Search bar.
+        // Floating glass search + sort.
         Positioned(
           top: 0,
           left: 0,
@@ -620,80 +622,71 @@ class _MapScreenState extends State<MapScreen> {
               child: Row(
                 children: [
                   Expanded(
-                    child: TextField(
-                      controller: _searchController,
-                      onChanged: (value) => setState(() => _query = value),
-                      style: const TextStyle(
-                        color: AppColors.textPrimary,
-                        fontSize: 14.5,
-                      ),
-                      textInputAction: TextInputAction.search,
-                      decoration: InputDecoration(
-                        hintText: 'Search spots or cities',
-                        fillColor: const Color(0xF70F0F11),
-                        contentPadding: const EdgeInsets.symmetric(
-                          horizontal: 16,
-                          vertical: 13,
+                    child: GlassPanel(
+                      borderRadius: 999,
+                      blur: 24,
+                      padding: const EdgeInsets.symmetric(horizontal: 4),
+                      shadows: const [
+                        BoxShadow(
+                          color: Color(0x4D000000),
+                          blurRadius: 18,
+                          offset: Offset(0, 6),
                         ),
-                        prefixIcon: const Icon(
-                          Icons.search_rounded,
-                          color: AppColors.textSecondary,
-                          size: 20,
+                      ],
+                      child: TextField(
+                        controller: _searchController,
+                        onChanged: (value) => setState(() => _query = value),
+                        style: const TextStyle(
+                          color: AppColors.textPrimary,
+                          fontSize: 14.5,
                         ),
-                        suffixIcon: _query.isEmpty
-                            ? null
-                            : IconButton(
-                                tooltip: 'Clear search',
-                                onPressed: () {
-                                  _searchController.clear();
-                                  setState(() => _query = '');
-                                  FocusManager.instance.primaryFocus?.unfocus();
-                                },
-                                icon: const Icon(
-                                  Icons.close_rounded,
-                                  color: AppColors.textSecondary,
-                                  size: 18,
+                        textInputAction: TextInputAction.search,
+                        decoration: InputDecoration(
+                          hintText: 'Search spots or cities',
+                          hintStyle: const TextStyle(
+                            color: AppColors.textSecondary,
+                            fontSize: 14,
+                          ),
+                          filled: false,
+                          isDense: true,
+                          border: InputBorder.none,
+                          enabledBorder: InputBorder.none,
+                          focusedBorder: InputBorder.none,
+                          contentPadding: const EdgeInsets.symmetric(
+                            vertical: 14,
+                          ),
+                          prefixIcon: const Icon(
+                            Icons.search_rounded,
+                            color: AppColors.textSecondary,
+                            size: 20,
+                          ),
+                          suffixIcon: _query.isEmpty
+                              ? null
+                              : IconButton(
+                                  tooltip: 'Clear search',
+                                  onPressed: () {
+                                    _searchController.clear();
+                                    setState(() => _query = '');
+                                    FocusManager.instance.primaryFocus
+                                        ?.unfocus();
+                                  },
+                                  icon: const Icon(
+                                    Icons.close_rounded,
+                                    color: AppColors.textSecondary,
+                                    size: 18,
+                                  ),
                                 ),
-                              ),
-                        border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(999),
-                          borderSide: const BorderSide(
-                            color: AppColors.hairline,
-                          ),
-                        ),
-                        enabledBorder: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(999),
-                          borderSide: const BorderSide(
-                            color: AppColors.hairline,
-                          ),
-                        ),
-                        focusedBorder: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(999),
-                          borderSide: const BorderSide(
-                            color: Color(0x4DFFFFFF),
-                          ),
                         ),
                       ),
                     ),
                   ),
                   const SizedBox(width: 8),
-                  PressButton(
+                  GlassIconButton(
+                    icon: Icons.tune_rounded,
                     semanticLabel: 'Sort spots',
                     onTap: _openSortSheet,
-                    child: Container(
-                      width: 46,
-                      height: 46,
-                      decoration: BoxDecoration(
-                        color: const Color(0xF70F0F11),
-                        shape: BoxShape.circle,
-                        border: Border.all(color: AppColors.hairline),
-                      ),
-                      child: const Icon(
-                        Icons.tune_rounded,
-                        color: AppColors.textPrimary,
-                        size: 19,
-                      ),
-                    ),
+                    size: 48,
+                    iconSize: 19,
                   ),
                 ],
               ),
@@ -781,12 +774,12 @@ class _MapScreenState extends State<MapScreen> {
                         decoration: BoxDecoration(
                           color: active
                               ? AppColors.action
-                              : const Color(0xF70F0F11),
+                              : const Color(0xD90F0F11),
                           borderRadius: BorderRadius.circular(999),
                           border: Border.all(
                             color: active
                                 ? AppColors.action
-                                : AppColors.hairline,
+                                : const Color(0x2EFFFFFF),
                           ),
                         ),
                         child: Row(
@@ -830,7 +823,7 @@ class _MapScreenState extends State<MapScreen> {
           duration: AppMotion.quick,
           curve: AppMotion.easeOut,
           right: 16,
-          bottom: selected != null ? 188 : 76,
+          bottom: selected != null ? 244 : 96,
           child: Column(
             children: [
               if (allSpots.length > 1)
@@ -896,7 +889,7 @@ class _MapScreenState extends State<MapScreen> {
         Positioned(
           left: 0,
           right: 0,
-          bottom: 76,
+          bottom: 92,
           child: Center(
             child: ConstrainedBox(
               constraints: const BoxConstraints(maxWidth: 430),
@@ -1024,30 +1017,41 @@ class _MapControl extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return PressButton(
-      semanticLabel: semanticLabel,
-      onTap: onTap,
-      child: Container(
-        width: 46,
-        height: 46,
-        decoration: BoxDecoration(
-          color: const Color(0xF70F0F11),
-          shape: BoxShape.circle,
-          border: Border.all(color: const Color(0x2EFFFFFF)),
-          boxShadow: const [
-            BoxShadow(
-              color: Color(0x66000000),
-              blurRadius: 12,
-              offset: Offset(0, 4),
+    return Container(
+      decoration: const BoxDecoration(
+        shape: BoxShape.circle,
+        boxShadow: [
+          BoxShadow(
+            color: Color(0x59000000),
+            blurRadius: 16,
+            offset: Offset(0, 6),
+          ),
+        ],
+      ),
+      child: ClipOval(
+        child: BackdropFilter(
+          filter: ui.ImageFilter.blur(sigmaX: 22, sigmaY: 22),
+          child: PressButton(
+            semanticLabel: semanticLabel,
+            onTap: onTap,
+            child: Container(
+              width: 48,
+              height: 48,
+              alignment: Alignment.center,
+              decoration: BoxDecoration(
+                color: const Color(0x29FFFFFF),
+                shape: BoxShape.circle,
+                border: Border.all(color: AppColors.glassBorder),
+              ),
+              child: loading
+                  ? const Padding(
+                      padding: EdgeInsets.all(14),
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : Icon(icon, color: AppColors.textPrimary, size: 20),
             ),
-          ],
+          ),
         ),
-        child: loading
-            ? const Padding(
-                padding: EdgeInsets.all(14),
-                child: CircularProgressIndicator(strokeWidth: 2),
-              )
-            : Icon(icon, color: AppColors.textPrimary, size: 20),
       ),
     );
   }
@@ -1108,6 +1112,8 @@ class _FallbackNotice extends StatelessWidget {
   }
 }
 
+/// The floating preview for a tapped pin: a frosted card that leads with the
+/// photo and shows the live engagement the ranking actually uses.
 class _PlaceCard extends StatelessWidget {
   const _PlaceCard({
     super.key,
@@ -1122,49 +1128,129 @@ class _PlaceCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final saved = context.watch<AppState>().isSaved(spot.id);
+    final state = context.watch<AppState>();
+    final saved = state.isSaved(spot.id);
     final metric = context.watch<SettingsState>().metricUnits;
+    final live = state.realtimeConnected;
 
     return GestureDetector(
       onTap: () => openSpot(context, spot),
-      child: Container(
-        padding: const EdgeInsets.all(9),
-        decoration: BoxDecoration(
-          color: const Color(0xF2121214),
-          borderRadius: BorderRadius.circular(18),
-          border: Border.all(color: AppColors.hairline),
-          boxShadow: const [
-            BoxShadow(
-              color: Color(0x66000000),
-              blurRadius: 20,
-              offset: Offset(0, 8),
-            ),
-          ],
-        ),
+      child: GlassPanel(
+        borderRadius: 26,
+        blur: 30,
+        padding: const EdgeInsets.all(10),
+        shadows: const [
+          BoxShadow(
+            color: Color(0x8C000000),
+            blurRadius: 30,
+            spreadRadius: -6,
+            offset: Offset(0, 16),
+          ),
+        ],
         child: Row(
           children: [
             ClipRRect(
-              borderRadius: BorderRadius.circular(12),
-              child: SpotImage(photo: spot.coverPhoto, width: 64, height: 64),
+              borderRadius: BorderRadius.circular(18),
+              child: SizedBox(
+                width: 104,
+                height: 112,
+                child: Stack(
+                  fit: StackFit.expand,
+                  children: [
+                    SpotImage(
+                      photo: spot.coverPhoto,
+                      cacheWidth: 240,
+                      iconSize: 26,
+                    ),
+                    const DecoratedBox(
+                      decoration: BoxDecoration(
+                        gradient: LinearGradient(
+                          begin: Alignment.topCenter,
+                          end: Alignment.bottomCenter,
+                          colors: [Color(0x33000000), Color(0x00000000)],
+                        ),
+                      ),
+                    ),
+                    if (spot.bestTime != null)
+                      Positioned(
+                        left: 7,
+                        bottom: 7,
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 7,
+                            vertical: 3,
+                          ),
+                          decoration: BoxDecoration(
+                            color: const Color(0xA6000000),
+                            borderRadius: BorderRadius.circular(999),
+                            border: Border.all(color: const Color(0x26FFFFFF)),
+                          ),
+                          child: Text(
+                            spot.bestTime!,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 9.5,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
+              ),
             ),
-            const SizedBox(width: 11),
+            const SizedBox(width: 12),
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisAlignment: MainAxisAlignment.center,
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   Text(
                     spot.title,
-                    maxLines: 1,
+                    maxLines: 2,
                     overflow: TextOverflow.ellipsis,
                     style: const TextStyle(
                       color: AppColors.textPrimary,
-                      fontSize: 15,
+                      fontSize: 16,
+                      height: 1.15,
                       fontWeight: FontWeight.w800,
-                      letterSpacing: -0.3,
+                      letterSpacing: -0.4,
                     ),
                   ),
                   const SizedBox(height: 5),
+                  Row(
+                    children: [
+                      const Icon(
+                        Icons.place_rounded,
+                        color: AppColors.textFaint,
+                        size: 12,
+                      ),
+                      const SizedBox(width: 3),
+                      Flexible(
+                        child: Text(
+                          [
+                            if (spot.city.isNotEmpty) spot.city,
+                            if (distanceKm != null)
+                              formatDistance(distanceKm!, metric: metric),
+                          ].join(' · '),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            color: AppColors.textSecondary,
+                            fontSize: 11.5,
+                          ),
+                        ),
+                      ),
+                      if (live) ...[
+                        const SizedBox(width: 7),
+                        const _LiveBadge(),
+                      ],
+                    ],
+                  ),
+                  const SizedBox(height: 9),
                   Row(
                     children: [
                       const Icon(
@@ -1177,98 +1263,183 @@ class _PlaceCard extends StatelessWidget {
                         spot.rating.toStringAsFixed(1),
                         style: const TextStyle(
                           color: AppColors.textPrimary,
-                          fontSize: 12.5,
+                          fontSize: 12,
                           fontWeight: FontWeight.w800,
                         ),
                       ),
-                      Text(
-                        ' (${formatCount(spot.reviewCount)})',
-                        style: const TextStyle(
-                          color: AppColors.textFaint,
-                          fontSize: 12,
-                        ),
+                      const SizedBox(width: 10),
+                      _StatChip(
+                        icon: Icons.favorite_rounded,
+                        value: formatCount(spot.likeCount),
+                        tint: AppColors.like,
                       ),
                       const SizedBox(width: 8),
-                      const Icon(
-                        Icons.near_me_rounded,
-                        color: AppColors.textFaint,
-                        size: 12,
+                      _StatChip(
+                        icon: Icons.forum_rounded,
+                        value: formatCount(spot.commentCount),
+                        tint: AppColors.textSecondary,
                       ),
-                      const SizedBox(width: 3),
-                      Flexible(
-                        child: Text(
-                          distanceKm != null
-                              ? formatDistance(distanceKm!, metric: metric)
-                              : spot.city,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(
-                            color: AppColors.textFaint,
-                            fontSize: 12,
-                          ),
-                        ),
+                      const SizedBox(width: 8),
+                      _StatChip(
+                        icon: Icons.bookmark_rounded,
+                        value: formatCount(spot.saveCount),
+                        tint: AppColors.textSecondary,
                       ),
                     ],
                   ),
-                  const SizedBox(height: 4),
-                  Text(
-                    spot.bestTime != null
-                        ? 'Best view in ${spot.city} · ${spot.bestTime}'
-                        : 'Best view in ${spot.city}',
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                      color: AppColors.textSecondary,
-                      fontSize: 11.5,
-                    ),
+                  const SizedBox(height: 9),
+                  Row(
+                    children: [
+                      Text(
+                        'View spot',
+                        style: TextStyle(
+                          color: AppColors.textPrimary.withValues(alpha: 0.9),
+                          fontSize: 11.5,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                      const SizedBox(width: 3),
+                      const Icon(
+                        Icons.arrow_forward_rounded,
+                        color: AppColors.textSecondary,
+                        size: 14,
+                      ),
+                    ],
                   ),
                 ],
               ),
             ),
-            Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Semantics(
-                  button: true,
-                  label: saved ? 'Remove from saved' : 'Save spot',
-                  child: IconButton(
-                    onPressed: () => toggleSaveWithFeedback(context, spot),
-                    tooltip: saved ? 'Remove from saved' : 'Save spot',
-                    constraints: const BoxConstraints(
-                      minWidth: AppLayout.minTapTarget,
-                      minHeight: 44,
-                    ),
-                    icon: Icon(
-                      saved
-                          ? Icons.bookmark_rounded
-                          : Icons.bookmark_outline_rounded,
-                      color: saved ? AppColors.star : AppColors.textSecondary,
-                      size: 21,
-                    ),
-                  ),
-                ),
-                if (onClose != null)
-                  Semantics(
-                    button: true,
-                    label: 'Close place card',
-                    child: IconButton(
-                      onPressed: onClose,
-                      tooltip: 'Close',
-                      constraints: const BoxConstraints(
-                        minWidth: AppLayout.minTapTarget,
-                        minHeight: 40,
+            const SizedBox(width: 6),
+            SizedBox(
+              height: 112,
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  PressButton(
+                    semanticLabel: saved
+                        ? 'Remove from saved'
+                        : 'Save spot',
+                    onTap: () => toggleSaveWithFeedback(context, spot),
+                    child: Container(
+                      width: 36,
+                      height: 36,
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        color: saved
+                            ? AppColors.action
+                            : const Color(0x1FFFFFFF),
+                        border: Border.all(
+                          color: saved
+                              ? AppColors.action
+                              : AppColors.glassBorder,
+                        ),
                       ),
-                      icon: const Icon(
-                        Icons.close_rounded,
-                        color: AppColors.textFaint,
+                      child: Icon(
+                        saved
+                            ? Icons.bookmark_rounded
+                            : Icons.bookmark_outline_rounded,
+                        color: saved
+                            ? AppColors.onAction
+                            : AppColors.textPrimary,
                         size: 18,
                       ),
                     ),
                   ),
-              ],
+                  if (onClose != null)
+                    PressButton(
+                      semanticLabel: 'Close place card',
+                      onTap: onClose!,
+                      child: Container(
+                        width: 36,
+                        height: 36,
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          color: const Color(0x14FFFFFF),
+                          border: Border.all(color: AppColors.glassBorder),
+                        ),
+                        child: const Icon(
+                          Icons.close_rounded,
+                          color: AppColors.textSecondary,
+                          size: 17,
+                        ),
+                      ),
+                    ),
+                ],
+              ),
             ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+class _StatChip extends StatelessWidget {
+  const _StatChip({required this.icon, required this.value, required this.tint});
+
+  final IconData icon;
+  final String value;
+  final Color tint;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Icon(icon, size: 11.5, color: tint),
+        const SizedBox(width: 3),
+        Text(
+          value,
+          style: const TextStyle(
+            color: AppColors.textSecondary,
+            fontSize: 11,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+/// A quiet "live" marker: the community data on this card updates itself.
+class _LiveBadge extends StatelessWidget {
+  const _LiveBadge();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+      decoration: BoxDecoration(
+        color: AppColors.success.withValues(alpha: 0.14),
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(
+          color: AppColors.success.withValues(alpha: 0.3),
+        ),
+      ),
+      child: const Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          SizedBox(
+            width: 4,
+            height: 4,
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                color: AppColors.success,
+                shape: BoxShape.circle,
+              ),
+            ),
+          ),
+          SizedBox(width: 4),
+          Text(
+            'Live',
+            style: TextStyle(
+              color: AppColors.success,
+              fontSize: 9,
+              fontWeight: FontWeight.w700,
+              letterSpacing: 0.2,
+            ),
+          ),
+        ],
       ),
     );
   }

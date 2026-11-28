@@ -16,6 +16,7 @@ import '../utils/share.dart';
 import '../utils/solar.dart';
 import '../widgets/comments_section.dart';
 import '../widgets/edit_spot_sheet.dart';
+import '../widgets/glass.dart';
 import '../widgets/moderation_dialogs.dart';
 import '../widgets/spot_image.dart';
 import '../widgets/spot_mini_map.dart';
@@ -308,51 +309,21 @@ class _SpotDetailScreenState extends State<SpotDetailScreen> {
                           const SizedBox(height: 26),
                           const Divider(height: 1, color: AppColors.hairline),
                           const SizedBox(height: 22),
-                          _ContributePhotoRow(spot: spot),
-                          const SizedBox(height: 22),
+                          _CommunityPhotos(
+                            spot: spot,
+                            photos: photos,
+                            index: _photoIndex,
+                            onSelect: (i) {
+                              setState(() => _photoIndex = i);
+                              _pageController.animateToPage(
+                                i,
+                                duration: AppMotion.quick,
+                                curve: AppMotion.easeOut,
+                              );
+                            },
+                          ),
+                          const SizedBox(height: 26),
                           CommentsSection(spotId: spot.id),
-                          if (photos.length > 1) ...[
-                            const SizedBox(height: 22),
-                            SizedBox(
-                              height: 110,
-                              child: ListView.separated(
-                                scrollDirection: Axis.horizontal,
-                                itemCount: photos.length,
-                                separatorBuilder: (_, _) =>
-                                    const SizedBox(width: 10),
-                                itemBuilder: (_, i) {
-                                  final selected = i == _photoIndex;
-                                  return GestureDetector(
-                                    onTap: () {
-                                      setState(() => _photoIndex = i);
-                                      _pageController.animateToPage(
-                                        i,
-                                        duration: AppMotion.quick,
-                                        curve: AppMotion.easeOut,
-                                      );
-                                    },
-                                    child: AnimatedContainer(
-                                      duration: AppMotion.quick,
-                                      width: 150,
-                                      decoration: BoxDecoration(
-                                        borderRadius: BorderRadius.circular(14),
-                                        border: Border.all(
-                                          color: selected
-                                              ? AppColors.textPrimary
-                                              : Colors.transparent,
-                                          width: 2,
-                                        ),
-                                      ),
-                                      child: ClipRRect(
-                                        borderRadius: BorderRadius.circular(12),
-                                        child: SpotImage(photo: photos[i]),
-                                      ),
-                                    ),
-                                  );
-                                },
-                              ),
-                            ),
-                          ],
                         ],
                       ),
                     ),
@@ -642,6 +613,7 @@ class _EngagementRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final live = context.watch<AppState>().realtimeConnected;
     final items = <(IconData, String, Color)>[
       (Icons.bookmark_rounded, '${formatCount(spot.saveCount)} saves', AppColors.star),
       (Icons.favorite_rounded, '${formatCount(spot.likeCount)} likes', AppColors.like),
@@ -665,6 +637,31 @@ class _EngagementRow extends StatelessWidget {
                   color: AppColors.textSecondary,
                   fontSize: 11.5,
                   fontWeight: FontWeight.w600,
+                ),
+              ),
+            ],
+          ),
+        if (live)
+          const Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              SizedBox(
+                width: 5,
+                height: 5,
+                child: DecoratedBox(
+                  decoration: BoxDecoration(
+                    color: AppColors.success,
+                    shape: BoxShape.circle,
+                  ),
+                ),
+              ),
+              SizedBox(width: 5),
+              Text(
+                'Live',
+                style: TextStyle(
+                  color: AppColors.success,
+                  fontSize: 11,
+                  fontWeight: FontWeight.w700,
                 ),
               ),
             ],
@@ -980,19 +977,30 @@ class _GearChip extends StatelessWidget {
   }
 }
 
-class _ContributePhotoRow extends StatefulWidget {
-  const _ContributePhotoRow({required this.spot});
+/// The community gallery for a spot: every angle people have shared, plus a
+/// one-tap way for anyone to add their own. Several photos can be contributed
+/// in one pass — useful when a place deserves more than a single frame.
+class _CommunityPhotos extends StatefulWidget {
+  const _CommunityPhotos({
+    required this.spot,
+    required this.photos,
+    required this.index,
+    required this.onSelect,
+  });
 
   final Spot spot;
+  final List<SpotPhoto> photos;
+  final int index;
+  final ValueChanged<int> onSelect;
 
   @override
-  State<_ContributePhotoRow> createState() => _ContributePhotoRowState();
+  State<_CommunityPhotos> createState() => _CommunityPhotosState();
 }
 
-class _ContributePhotoRowState extends State<_ContributePhotoRow> {
+class _CommunityPhotosState extends State<_CommunityPhotos> {
   bool _uploading = false;
 
-  Future<void> _addPhoto() async {
+  Future<void> _addPhotos() async {
     if (_uploading) return;
     if (!await requireSignedInAccount(
       context,
@@ -1004,20 +1012,35 @@ class _ContributePhotoRowState extends State<_ContributePhotoRow> {
     final messenger = ScaffoldMessenger.of(context);
     final app = context.read<AppState>();
     try {
-      final picked = await ImagePicker().pickImage(source: ImageSource.gallery);
-      if (picked == null || !mounted) return;
+      final picked = await ImagePicker().pickMultiImage(
+        requestFullMetadata: true,
+      );
+      if (picked.isEmpty || !mounted) return;
       setState(() => _uploading = true);
-      final raw = await picked.readAsBytes();
-      final sanitized = await compressForUpload(raw);
-      await app.addSpotPhoto(spotId: widget.spot.id, photoBytes: sanitized);
+      var added = 0;
+      for (final file in picked) {
+        final raw = await file.readAsBytes();
+        final sanitized = await compressForUpload(raw);
+        await app.addSpotPhoto(
+          spotId: widget.spot.id,
+          photoBytes: sanitized,
+        );
+        added++;
+      }
       if (!mounted) return;
       messenger.showSnackBar(
-        const SnackBar(content: Text('Photo added to spot.')),
+        SnackBar(
+          content: Text(
+            added == 1
+                ? 'Your photo was added to this spot.'
+                : '$added photos were added to this spot.',
+          ),
+        ),
       );
     } catch (e) {
       if (!mounted) return;
       messenger.showSnackBar(
-        SnackBar(content: Text('Could not add photo: $e')),
+        SnackBar(content: Text('Could not add photos: $e')),
       );
     } finally {
       if (mounted) setState(() => _uploading = false);
@@ -1026,22 +1049,155 @@ class _ContributePhotoRowState extends State<_ContributePhotoRow> {
 
   @override
   Widget build(BuildContext context) {
-    return OutlinedButton.icon(
-      onPressed: _uploading ? null : _addPhoto,
-      style: OutlinedButton.styleFrom(
-        foregroundColor: AppColors.textPrimary,
-        side: const BorderSide(color: AppColors.hairline),
-        minimumSize: const Size.fromHeight(46),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-      ),
-      icon: _uploading
-          ? const SizedBox(
-              width: 16,
-              height: 16,
-              child: CircularProgressIndicator(strokeWidth: 2),
-            )
-          : const Icon(Icons.add_a_photo_outlined, size: 18),
-      label: Text(_uploading ? 'Uploading photo…' : 'Add your angle to this spot'),
+    final theme = Theme.of(context).textTheme;
+    final photos = widget.photos;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            const Icon(
+              Icons.photo_library_outlined,
+              color: AppColors.textSecondary,
+              size: 18,
+            ),
+            const SizedBox(width: 8),
+            Flexible(
+              child: Text(
+                'Community photos',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: theme.titleMedium?.copyWith(fontSize: 17),
+              ),
+            ),
+            const SizedBox(width: 8),
+            Text(
+              '${photos.length}',
+              style: const TextStyle(
+                color: AppColors.textFaint,
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+            const Spacer(),
+            TextButton(
+              onPressed: _uploading ? null : _addPhotos,
+              style: TextButton.styleFrom(
+                foregroundColor: AppColors.textPrimary,
+                visualDensity: VisualDensity.compact,
+                padding: const EdgeInsets.symmetric(horizontal: 10),
+                minimumSize: const Size(0, 40),
+                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              ),
+              child: _uploading
+                  ? const SizedBox(
+                      width: 14,
+                      height: 14,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : const Text('Add'),
+            ),
+          ],
+        ),
+        const SizedBox(height: 10),
+        SizedBox(
+          height: 104,
+          child: ListView.separated(
+            scrollDirection: Axis.horizontal,
+            clipBehavior: Clip.none,
+            itemCount: photos.length + 1,
+            separatorBuilder: (_, _) => const SizedBox(width: 9),
+            itemBuilder: (_, i) {
+              if (i == photos.length) {
+                return PressButton(
+                  semanticLabel: 'Add your photos to this spot',
+                  onTap: () {
+                    if (!_uploading) _addPhotos();
+                  },
+                  child: Container(
+                    width: 92,
+                    decoration: BoxDecoration(
+                      color: AppColors.glassFill,
+                      borderRadius: BorderRadius.circular(14),
+                      border: Border.all(color: AppColors.glassBorder),
+                    ),
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        const Icon(
+                          Icons.add_rounded,
+                          color: AppColors.textPrimary,
+                          size: 24,
+                        ),
+                        const SizedBox(height: 6),
+                        Text(
+                          'Add yours',
+                          style: theme.bodySmall?.copyWith(
+                            color: AppColors.textSecondary,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                );
+              }
+
+              final selected = i == widget.index;
+              return GestureDetector(
+                onTap: () => widget.onSelect(i),
+                child: AnimatedContainer(
+                  duration: AppMotion.quick,
+                  width: 138,
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(14),
+                    border: Border.all(
+                      color: selected
+                          ? AppColors.textPrimary
+                          : Colors.transparent,
+                      width: 2,
+                    ),
+                  ),
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(12),
+                    child: Stack(
+                      fit: StackFit.expand,
+                      children: [
+                        SpotImage(photo: photos[i], cacheWidth: 300),
+                        if (photos[i].uploadedBy != null)
+                          Positioned(
+                            left: 6,
+                            bottom: 6,
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 6,
+                                vertical: 2,
+                              ),
+                              decoration: BoxDecoration(
+                                color: const Color(0x99000000),
+                                borderRadius: BorderRadius.circular(999),
+                              ),
+                              child: Text(
+                                photos[i].uploadedBy!,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 9.5,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ),
+                          ),
+                      ],
+                    ),
+                  ),
+                ),
+              );
+            },
+          ),
+        ),
+      ],
     );
   }
 }
@@ -1057,14 +1213,21 @@ class _ActionBar extends StatelessWidget {
     final theme = Theme.of(context).textTheme;
     final state = context.watch<AppState>();
     final liked = state.isLiked(spot.id);
-    return Container(
-      padding: const EdgeInsets.fromLTRB(16, 12, 16, 10),
-      decoration: BoxDecoration(
-        color: AppColors.background,
-        border: Border(top: BorderSide(color: AppColors.hairline)),
-      ),
-      child: SafeArea(
-        top: false,
+    return SafeArea(
+      top: false,
+      minimum: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+      child: GlassPanel(
+        borderRadius: 26,
+        blur: 28,
+        padding: const EdgeInsets.fromLTRB(10, 10, 10, 10),
+        shadows: const [
+          BoxShadow(
+            color: Color(0x8C000000),
+            blurRadius: 28,
+            spreadRadius: -6,
+            offset: Offset(0, 12),
+          ),
+        ],
         child: ResponsiveBody(
           child: Row(
             children: [
@@ -1078,8 +1241,8 @@ class _ActionBar extends StatelessWidget {
                     height: 44,
                     decoration: BoxDecoration(
                       color: liked
-                          ? AppColors.like.withValues(alpha: 0.16)
-                          : AppColors.surfaceElevated,
+                          ? AppColors.like.withValues(alpha: 0.18)
+                          : const Color(0x1FFFFFFF),
                       borderRadius: BorderRadius.circular(16),
                       border: Border.all(
                         color: liked
@@ -1107,7 +1270,7 @@ class _ActionBar extends StatelessWidget {
                     width: 44,
                     height: 44,
                     decoration: BoxDecoration(
-                      color: AppColors.surfaceElevated,
+                      color: const Color(0x1FFFFFFF),
                       borderRadius: BorderRadius.circular(16),
                       border: Border.all(color: AppColors.hairline),
                     ),
@@ -1136,7 +1299,7 @@ class _ActionBar extends StatelessWidget {
                     width: 44,
                     height: 44,
                     decoration: BoxDecoration(
-                      color: AppColors.surfaceElevated,
+                      color: const Color(0x1FFFFFFF),
                       borderRadius: BorderRadius.circular(16),
                       border: Border.all(color: AppColors.hairline),
                     ),

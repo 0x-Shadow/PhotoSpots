@@ -61,12 +61,21 @@ class _SettingsScreenState extends State<SettingsScreen> {
     }
 
     return Scaffold(
-      appBar: AppBar(title: const Text('Settings')),
+      appBar: AppBar(
+        title: const Text('Settings'),
+        titleTextStyle: const TextStyle(
+          fontFamily: 'Inter',
+          fontSize: 24,
+          fontWeight: FontWeight.w800,
+          letterSpacing: -0.8,
+          color: AppColors.textPrimary,
+        ),
+      ),
       body: SafeArea(
         child: ResponsiveBody(
           maxWidth: 680,
           child: ListView(
-            padding: const EdgeInsets.fromLTRB(20, 12, 20, 48),
+            padding: const EdgeInsets.fromLTRB(20, 4, 20, 48),
             children: [
               _Section(
                 title: 'Account',
@@ -185,7 +194,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       child: Text(
                         'Paste a CARTO API key to use this style.',
                         style: theme.bodySmall?.copyWith(
-                          color: AppColors.danger,
+                          color: AppColors.textSecondary,
                         ),
                       ),
                     ),
@@ -684,6 +693,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 }
 
+/// One quiet group of rows. A single surface colour, hairline dividers and a
+/// small uppercase label replace the old stack of differently tinted cards.
 class _Section extends StatelessWidget {
   const _Section({required this.title, required this.children});
 
@@ -693,27 +704,48 @@ class _Section extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.only(bottom: 20),
+      padding: const EdgeInsets.only(bottom: 26),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Padding(
-            padding: const EdgeInsets.only(left: 4, bottom: 8),
+            padding: const EdgeInsets.only(left: 14, bottom: 8),
             child: Text(
-              title,
-              style: Theme.of(context).textTheme.labelMedium
-                  ?.copyWith(color: AppColors.textSecondary),
+              title.toUpperCase(),
+              style: const TextStyle(
+                fontFamily: 'Inter',
+                color: AppColors.textFaint,
+                fontSize: 11,
+                fontWeight: FontWeight.w700,
+                letterSpacing: 1.1,
+              ),
             ),
           ),
           DecoratedBox(
             decoration: BoxDecoration(
-              color: AppColors.surfaceElevated,
-              borderRadius: BorderRadius.circular(AppLayout.radiusCard),
+              color: AppColors.surface,
+              borderRadius: BorderRadius.circular(18),
               border: Border.all(color: AppColors.hairline),
             ),
             child: Material(
               color: Colors.transparent,
-              child: Column(children: children),
+              borderRadius: BorderRadius.circular(18),
+              clipBehavior: Clip.antiAlias,
+              child: Column(
+                children: [
+                  for (var i = 0; i < children.length; i++) ...[
+                    if (i > 0)
+                      const Divider(
+                        height: 1,
+                        thickness: 1,
+                        indent: 52,
+                        endIndent: 14,
+                        color: AppColors.hairline,
+                      ),
+                    children[i],
+                  ],
+                ],
+              ),
             ),
           ),
         ],
@@ -747,11 +779,9 @@ class _SelectRow extends StatelessWidget {
             children: [
               const SizedBox(width: 14),
               Icon(
-                selected
-                    ? Icons.radio_button_checked_rounded
-                    : Icons.radio_button_unchecked_rounded,
-                color: selected ? AppColors.accent : AppColors.textFaint,
-                size: 20,
+                selected ? Icons.check_rounded : Icons.circle_outlined,
+                color: selected ? AppColors.textPrimary : AppColors.textFaint,
+                size: selected ? 20 : 16,
               ),
               const SizedBox(width: 12),
               Expanded(
@@ -788,11 +818,16 @@ class _SwitchRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context).textTheme;
-    return SwitchListTile(
+    return SwitchListTile.adaptive(
       contentPadding: const EdgeInsets.symmetric(horizontal: 14),
-      activeThumbColor: AppColors.textPrimary,
-      activeTrackColor: AppColors.accent,
-      title: Text(title, style: theme.bodyLarge),
+      activeThumbColor: AppColors.onAction,
+      activeTrackColor: AppColors.textPrimary,
+      inactiveThumbColor: AppColors.textFaint,
+      inactiveTrackColor: const Color(0x1FFFFFFF),
+      title: Text(
+        title,
+        style: theme.bodyLarge?.copyWith(color: AppColors.textPrimary),
+      ),
       subtitle: Text(subtitle, style: theme.bodySmall),
       value: value,
       onChanged: onChanged,
@@ -826,11 +861,21 @@ class _ActionRow extends StatelessWidget {
         onTap: onTap,
         child: Container(
           constraints: const BoxConstraints(minHeight: AppLayout.minTapTarget),
-          padding: const EdgeInsets.symmetric(vertical: 8),
+          padding: const EdgeInsets.symmetric(vertical: 9),
           child: Row(
             children: [
               const SizedBox(width: 14),
-              Icon(icon, color: tint, size: 20),
+              Container(
+                width: 30,
+                height: 30,
+                alignment: Alignment.center,
+                decoration: BoxDecoration(
+                  color: const Color(0x0FFFFFFF),
+                  borderRadius: BorderRadius.circular(9),
+                  border: Border.all(color: const Color(0x14FFFFFF)),
+                ),
+                child: Icon(icon, color: tint, size: 17),
+              ),
               const SizedBox(width: 12),
               Expanded(
                 child: Column(
@@ -910,11 +955,14 @@ class _InfoRow extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context).textTheme;
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 13),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(label, style: theme.bodyMedium),
+          Text(
+            label,
+            style: theme.bodyMedium?.copyWith(color: AppColors.textSecondary),
+          ),
           const SizedBox(width: 14),
           Expanded(
             child: Text(

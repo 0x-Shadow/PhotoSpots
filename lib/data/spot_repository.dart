@@ -116,6 +116,18 @@ abstract class SpotRepository {
   }) async {
     throw const AppException('Adding photos is unavailable.');
   }
+
+  /// True when this source pushes live community changes (Supabase Realtime).
+  /// In-memory sources return false so the UI never claims to be live.
+  bool get supportsRealtime => false;
+
+  /// Subscribes to live changes on spots, photos and comments. Returns a
+  /// disposer; the default source has nothing to watch.
+  void Function() subscribeToChanges({
+    required void Function() onSpotsChanged,
+    required void Function(String spotId) onCommentsChanged,
+  }) =>
+      () {};
 }
 
 /// In-memory repository with curated seed data. Powers the app until
@@ -140,6 +152,17 @@ class MockSpotRepository implements SpotRepository {
 
   /// Comments written in this session are attributed to the local person.
   String get _viewerName => 'You';
+
+  /// Demo data lives in memory, so there is nothing to subscribe to.
+  @override
+  bool get supportsRealtime => false;
+
+  @override
+  void Function() subscribeToChanges({
+    required void Function() onSpotsChanged,
+    required void Function(String spotId) onCommentsChanged,
+  }) =>
+      () {};
 
   @override
   Future<List<Spot>> fetchSpots() async => List.unmodifiable(_spots);

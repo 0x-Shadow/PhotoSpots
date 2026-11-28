@@ -23,6 +23,58 @@ class SupabaseSpotRepository implements SpotRepository {
 
   final Set<String> _profiledIds = {};
 
+  RealtimeChannel? _changesChannel;
+
+  @override
+  bool get supportsRealtime => true;
+
+  /// Live community data. Spots, photos, likes/saves (server counters on the
+  /// spot row) and comments all arrive here, so ranking, counts and open
+  /// comment threads update without a manual refresh.
+  @override
+  void Function() subscribeToChanges({
+    required void Function() onSpotsChanged,
+    required void Function(String spotId) onCommentsChanged,
+  }) {
+    _changesChannel?.unsubscribe();
+    final channel = _client
+        .channel('public:photospot-feed')
+        .onPostgresChanges(
+          event: PostgresChangeEvent.all,
+          schema: 'public',
+          table: 'spots',
+          callback: (_) => onSpotsChanged(),
+        )
+        .onPostgresChanges(
+          event: PostgresChangeEvent.all,
+          schema: 'public',
+          table: 'photos',
+          callback: (_) => onSpotsChanged(),
+        )
+        .onPostgresChanges(
+          event: PostgresChangeEvent.all,
+          schema: 'public',
+          table: 'comments',
+          callback: (payload) {
+            final record = payload.newRecord.isNotEmpty
+                ? payload.newRecord
+                : payload.oldRecord;
+            final spotId = record['spot_id']?.toString();
+            if (spotId != null && spotId.isNotEmpty) {
+              onCommentsChanged(spotId);
+            }
+          },
+        );
+    channel.subscribe();
+    _changesChannel = channel;
+
+    return () {
+      if (_changesChannel == channel) _changesChannel = null;
+      channel.unsubscribe();
+      _client.removeChannel(channel);
+    };
+  }
+
   /// The profile join must be named explicitly: `spots` and `profiles` are
   /// linked both by submitted_by and through saves, so an unqualified
   /// `profiles(...)` embed fails with PGRST201 (ambiguous relationship).

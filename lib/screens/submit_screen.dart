@@ -651,6 +651,39 @@ class _PhotoStudioStep extends StatelessWidget {
                                 ),
                               ],
                             ),
+                          )
+                        else if (hasPhoto)
+                          Container(
+                            margin: const EdgeInsets.only(bottom: 8),
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 10,
+                              vertical: 5,
+                            ),
+                            decoration: BoxDecoration(
+                              color: const Color(0xB3000000),
+                              borderRadius: BorderRadius.circular(999),
+                              border: Border.all(color: const Color(0x40FFFFFF)),
+                            ),
+                            child: const Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(
+                                  Icons.location_off_rounded,
+                                  color: Color(0xCCFFFFFF),
+                                  size: 13,
+                                ),
+                                SizedBox(width: 5),
+                                Text(
+                                  'No location in this photo — you\'ll place '
+                                  'the pin next',
+                                  style: TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                              ],
+                            ),
                           ),
                         Text(
                           hasPhoto

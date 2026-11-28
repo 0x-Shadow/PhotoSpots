@@ -64,9 +64,23 @@ class AppState extends ChangeNotifier {
   LocationOutcome? _lastOutcome;
   bool _disposed = false;
 
+  /// Live community feed (Supabase Realtime). When true, spot counts, ranking
+  /// inputs and open comment threads update themselves.
+  bool _realtimeConnected = false;
+  void Function()? _realtimeDisposer;
+  Timer? _realtimeRefreshTimer;
+
   bool get loading => _loading;
   Object? get error => _error;
-  List<Spot> get spots => List.unmodifiable(
+  /// Visible spots, memoized between notifications.
+  ///
+  /// Screens call this getter several times per frame (map build, culling,
+  /// cards). Returning a fresh filtered list each time made every build look
+  /// like new data to the map's memoization, which then re-sorted the whole
+  /// catalog on every pan frame. Invalidate on notify instead.
+  List<Spot>? _visibleSpotsCache;
+
+  List<Spot> get spots => _visibleSpotsCache ??= List.unmodifiable(
         _spots.where((s) =>
             !_hiddenSpotIds.contains(s.id) &&
             (s.submittedById == null ||
@@ -77,6 +91,7 @@ class AppState extends ChangeNotifier {
   Position? get userLocation => _userLocation;
   bool get hasUserLocation => _userLocation != null;
   bool get locationLoading => _locationLoading;
+  bool get realtimeConnected => _realtimeConnected;
   String? get activeUserId => _activeUserId;
   bool get personalizeFeed => _personalizeFeed;
 
@@ -322,10 +337,38 @@ class AppState extends ChangeNotifier {
       }
     } finally {
       if (seq == _loadSeq) {
+        _startRealtime();
         _loading = false;
         _notify();
       }
     }
+  }
+
+  /// Opens the live feed once. A repository without realtime support leaves
+  /// [realtimeConnected] false, so the UI never shows a fake live badge.
+  void _startRealtime() {
+    if (_realtimeDisposer != null) return;
+    _realtimeConnected = _repo.supportsRealtime;
+    if (!_realtimeConnected) return;
+    _realtimeDisposer = _repo.subscribeToChanges(
+      onSpotsChanged: _scheduleRealtimeRefresh,
+      onCommentsChanged: (spotId) {
+        if (_comments.containsKey(spotId)) {
+          loadComments(spotId, force: true);
+        }
+      },
+    );
+    _notify();
+  }
+
+  /// Coalesces a burst of row changes (a like updates the spot row, a new photo
+  /// updates it again) into one refetch so ranking stays live without thrashing.
+  void _scheduleRealtimeRefresh() {
+    _realtimeRefreshTimer?.cancel();
+    _realtimeRefreshTimer = Timer(const Duration(milliseconds: 900), () async {
+      if (_disposed) return;
+      await refresh();
+    });
   }
 
   /// Syncs remote user-owned lists (saves, likes, blocks) after signing in.
@@ -943,12 +986,16 @@ class AppState extends ChangeNotifier {
   }
 
   void _notify() {
+    _visibleSpotsCache = null;
     if (!_disposed) notifyListeners();
   }
 
   @override
   void dispose() {
     _disposed = true;
+    _realtimeRefreshTimer?.cancel();
+    _realtimeDisposer?.call();
+    _realtimeDisposer = null;
     super.dispose();
   }
 }

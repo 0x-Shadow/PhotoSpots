@@ -802,3 +802,31 @@ join spots s on s.title = v.title
 where not exists (
   select 1 from photos p where p.spot_id = s.id and p.image_url like '%/seed/%'
 );
+-- ---------------------------------------------------------------------------
+-- 8. REALTIME: live spots, photos and comments
+-- ---------------------------------------------------------------------------
+-- The app subscribes to row changes so ranking, save/like/comment counters and
+-- open comment threads update themselves. Adding a table that is already part
+-- of the publication raises duplicate_object; a project without the default
+-- publication raises undefined_object. Both are safe to ignore.
+do $$
+begin
+  begin
+    alter publication supabase_realtime add table public.spots;
+  exception
+    when duplicate_object then null;
+    when undefined_object then null;
+  end;
+  begin
+    alter publication supabase_realtime add table public.photos;
+  exception
+    when duplicate_object then null;
+    when undefined_object then null;
+  end;
+  begin
+    alter publication supabase_realtime add table public.comments;
+  exception
+    when duplicate_object then null;
+    when undefined_object then null;
+  end;
+end $$;

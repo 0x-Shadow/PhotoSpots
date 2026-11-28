@@ -22,6 +22,15 @@ class AppColors {
   static const accent = Color(0xFF0A84FF);
   static const accentSoft = Color(0x1F0A84FF);
 
+  /// Frosted surfaces. One material everywhere: nav bar, sheets, map chrome
+  /// and auth. Keeping the tint neutral is what makes the glass read as glass
+  /// rather than a coloured panel.
+  static const glassFill = Color(0x14FFFFFF);
+  static const glassFillStrong = Color(0x24FFFFFF);
+  static const glassBorder = Color(0x26FFFFFF);
+  static const glassHighlight = Color(0x59FFFFFF);
+  static const glassScrim = Color(0xB30A0A0B);
+
   static const star = Color(0xFFFFB84D);
   static const trending = Color(0xFFFF6B4A);
   static const like = Color(0xFFFF4D6D);
