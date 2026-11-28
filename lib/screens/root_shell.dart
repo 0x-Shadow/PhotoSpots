@@ -191,12 +191,12 @@ class _Destination {
   final String label;
 }
 
-int _tabIndexForSlot(int slot) => (slot > 2 ? slot - 1 : slot).clamp(0, 3);
-
-/// A floating liquid-glass navigation bar, built the way the platform does it:
-/// one capsule of destinations on a single piece of glass, and the prominent
-/// action on its own piece beside it. Nothing sits in a hole in the middle, so
-/// the bar reads as one deliberate row rather than five slots with a gap.
+/// A floating liquid-glass navigation bar.
+///
+/// Everything lives on one piece of glass: Home, Map, the prominent Add in the
+/// centre, then Saved and Profile. The Add is a solid blue disc seated inside
+/// the capsule instead of a badge floating over a gap, so the bar is one
+/// uninterrupted surface and the middle action still carries the most weight.
 class _NavBar extends StatefulWidget {
   const _NavBar({required this.selectedSlot, required this.onSlotSelected});
 
@@ -230,9 +230,15 @@ class _NavBar extends StatefulWidget {
     ),
   ];
 
-  static const double barHeight = 68;
-  static const double actionSize = 58;
-  static const double gap = 10;
+  static const double barHeight = 72;
+
+  /// The Add disc inside the capsule. Small enough to leave the glass visible
+  /// around it, large enough to read as the bar's primary action.
+  static const double actionSize = 50;
+
+  /// Destinations and the Add slot, in bar order.
+  static const int slotCount = 5;
+  static const int addSlot = 2;
 
   @override
   State<_NavBar> createState() => _NavBarState();
@@ -242,30 +248,30 @@ class _NavBarState extends State<_NavBar> with SingleTickerProviderStateMixin {
   late final AnimationController _springController;
   late Animation<double> _slotAnimation;
 
-  double get _targetTab => _tabIndexForSlot(widget.selectedSlot).toDouble();
-
   @override
   void initState() {
     super.initState();
     _springController = AnimationController.unbounded(vsync: this);
-    _slotAnimation = AlwaysStoppedAnimation(_targetTab);
-    _springController.value = _targetTab;
+    _slotAnimation = AlwaysStoppedAnimation(
+      widget.selectedSlot.toDouble(),
+    );
+    _springController.value = widget.selectedSlot.toDouble();
   }
 
-  void _animateToTab(int tab) {
+  void _animateToSlot(int slot) {
     if (MediaQuery.disableAnimationsOf(context)) {
-      _springController.value = tab.toDouble();
+      _springController.value = slot.toDouble();
       return;
     }
     _slotAnimation = Tween<double>(
       begin: _slotAnimation.value,
-      end: tab.toDouble(),
+      end: slot.toDouble(),
     ).animate(_springController);
     _springController.animateWith(
       SpringSimulation(
         const SpringDescription(mass: 1.0, stiffness: 260.0, damping: 26.0),
         _springController.value,
-        tab.toDouble(),
+        slot.toDouble(),
         0,
       ),
     );
@@ -275,7 +281,7 @@ class _NavBarState extends State<_NavBar> with SingleTickerProviderStateMixin {
   void didUpdateWidget(covariant _NavBar oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.selectedSlot != widget.selectedSlot) {
-      _animateToTab(_tabIndexForSlot(widget.selectedSlot));
+      _animateToSlot(widget.selectedSlot);
     }
   }
 
@@ -286,8 +292,8 @@ class _NavBarState extends State<_NavBar> with SingleTickerProviderStateMixin {
   }
 
   void _handleSlot(int slot) {
-    // Slot 2 opens the submit flow; the lens should stay where it is.
-    if (slot != 2) _animateToTab(_tabIndexForSlot(slot));
+    // The Add slot opens the submit flow; the lens should stay where it is.
+    if (slot != _NavBar.addSlot) _animateToSlot(slot);
     widget.onSlotSelected(slot);
   }
 
@@ -300,124 +306,113 @@ class _NavBarState extends State<_NavBar> with SingleTickerProviderStateMixin {
       minimum: const EdgeInsets.fromLTRB(16, 0, 16, 10),
       child: SizedBox(
         height: _NavBar.barHeight,
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Expanded(
-              child: GlassPanel(
-                borderRadius: _NavBar.barHeight / 2,
-                blur: 32,
-                shadows: const [
-                  BoxShadow(
-                    color: Color(0x8C000000),
-                    blurRadius: 30,
-                    spreadRadius: -6,
-                    offset: Offset(0, 14),
-                  ),
-                ],
-                child: LayoutBuilder(
-                  builder: (context, constraints) {
-                    final tabWidth =
-                        constraints.maxWidth / _NavBar._destinations.length;
-
-                    return Stack(
-                      children: [
-                        // Specular highlight: the top edge catches light like
-                        // real glass, brightest through the middle.
-                        Positioned(
-                          top: 0,
-                          left: 24,
-                          right: 24,
-                          child: Container(
-                            height: 1,
-                            decoration: const BoxDecoration(
-                              gradient: LinearGradient(
-                                colors: [
-                                  Color(0x00FFFFFF),
-                                  Color(0x59FFFFFF),
-                                  Color(0x00FFFFFF),
-                                ],
-                              ),
-                            ),
-                          ),
-                        ),
-                        // The active lens glides between destinations on a
-                        // spring. It stays inset from the glass edge so the
-                        // bar still reads as a capsule, not two stacked pills.
-                        Positioned.fill(
-                          child: IgnorePointer(
-                            child: AnimatedBuilder(
-                              animation: _slotAnimation,
-                              builder: (context, _) {
-                                final value = _slotAnimation.value
-                                    .clamp(
-                                      0.0,
-                                      (_NavBar._destinations.length - 1)
-                                          .toDouble(),
-                                    )
-                                    .toDouble();
-                                return Stack(
-                                  children: [
-                                    Positioned(
-                                      left: value * tabWidth + 5,
-                                      top: 6,
-                                      bottom: 6,
-                                      width: tabWidth - 10,
-                                      child: const DecoratedBox(
-                                        decoration: BoxDecoration(
-                                          color: AppColors.accentSoft,
-                                          borderRadius: BorderRadius.all(
-                                            Radius.circular(28),
-                                          ),
-                                          boxShadow: [
-                                            BoxShadow(
-                                              color: Color(0x33328AFF),
-                                              blurRadius: 16,
-                                            ),
-                                          ],
-                                        ),
-                                      ),
-                                    ),
-                                  ],
-                                );
-                              },
-                            ),
-                          ),
-                        ),
-                        Row(
-                          children: [
-                            for (var i = 0;
-                                i < _NavBar._destinations.length;
-                                i++)
-                              Expanded(
-                                child: _NavItem(
-                                  icon: _NavBar._destinations[i].icon,
-                                  activeIcon:
-                                      _NavBar._destinations[i].activeIcon,
-                                  label: _NavBar._destinations[i].label,
-                                  selected:
-                                      _tabIndexForSlot(selectedSlot) == i,
-                                  onTap: () =>
-                                      _handleSlot(_NavBar._destinations[i].slot),
-                                ),
-                              ),
-                          ],
-                        ),
-                      ],
-                    );
-                  },
-                ),
-              ),
-            ),
-            const SizedBox(width: _NavBar.gap),
-            Align(
-              child: _AddAction(onTap: () => _handleSlot(2)),
+        child: GlassPanel(
+          borderRadius: _NavBar.barHeight / 2,
+          blur: 32,
+          shadows: const [
+            BoxShadow(
+              color: Color(0x8C000000),
+              blurRadius: 30,
+              spreadRadius: -6,
+              offset: Offset(0, 14),
             ),
           ],
+          child: LayoutBuilder(
+            builder: (context, constraints) {
+              final slotWidth = constraints.maxWidth / _NavBar.slotCount;
+
+              return Stack(
+                children: [
+                  // Specular highlight: the top edge catches light like real
+                  // glass, brightest through the middle.
+                  Positioned(
+                    top: 0,
+                    left: 24,
+                    right: 24,
+                    child: Container(
+                      height: 1,
+                      decoration: const BoxDecoration(
+                        gradient: LinearGradient(
+                          colors: [
+                            Color(0x00FFFFFF),
+                            Color(0x59FFFFFF),
+                            Color(0x00FFFFFF),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                  // The active lens glides between destinations on a spring,
+                  // passing behind the Add disc at the centre.
+                  Positioned.fill(
+                    child: IgnorePointer(
+                      child: AnimatedBuilder(
+                        animation: _slotAnimation,
+                        builder: (context, _) {
+                          final value = _slotAnimation.value
+                              .clamp(0.0, (_NavBar.slotCount - 1).toDouble())
+                              .toDouble();
+                          return Stack(
+                            children: [
+                              Positioned(
+                                left: value * slotWidth + 5,
+                                top: 7,
+                                bottom: 7,
+                                width: slotWidth - 10,
+                                child: const DecoratedBox(
+                                  decoration: BoxDecoration(
+                                    color: AppColors.accentSoft,
+                                    borderRadius: BorderRadius.all(
+                                      Radius.circular(29),
+                                    ),
+                                    boxShadow: [
+                                      BoxShadow(
+                                        color: Color(0x33328AFF),
+                                        blurRadius: 16,
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                            ],
+                          );
+                        },
+                      ),
+                    ),
+                  ),
+                  Row(
+                    children: [
+                      for (var slot = 0; slot < _NavBar.slotCount; slot++)
+                        Expanded(
+                          child: slot == _NavBar.addSlot
+                              ? Center(
+                                  child: _AddAction(
+                                    size: _NavBar.actionSize,
+                                    onTap: () => _handleSlot(slot),
+                                  ),
+                                )
+                              : _NavItem(
+                                  icon: _destinationForSlot(slot).icon,
+                                  activeIcon: _destinationForSlot(slot)
+                                      .activeIcon,
+                                  label: _destinationForSlot(slot).label,
+                                  selected: selectedSlot == slot,
+                                  onTap: () => _handleSlot(slot),
+                                ),
+                        ),
+                    ],
+                  ),
+                ],
+              );
+            },
+          ),
         ),
       ),
     );
   }
+
+  _Destination _destinationForSlot(int slot) => _NavBar._destinations
+      .firstWhere((destination) => destination.slot == slot);
 }
 
 class _NavItem extends StatelessWidget {
@@ -491,17 +486,17 @@ class _NavItem extends StatelessWidget {
   }
 }
 
-/// The prominent action: one blue glass circle on the trailing edge, beside
-/// the capsule rather than floating over a gap inside it.
+/// The prominent action: one blue glass disc. In the bar it sits in the centre
+/// slot on the same glass as the destinations; the wide rail reuses it as its
+/// leading action.
 class _AddAction extends StatelessWidget {
-  const _AddAction({required this.onTap});
+  const _AddAction({required this.onTap, this.size = _NavBar.actionSize});
 
   final VoidCallback onTap;
+  final double size;
 
   @override
   Widget build(BuildContext context) {
-    const size = _NavBar.actionSize;
-
     return PressButton(
       semanticLabel: 'Add a spot',
       onTap: onTap,
@@ -536,8 +531,12 @@ class _AddAction extends StatelessWidget {
                 ),
               ),
             ),
-            const Center(
-              child: Icon(Icons.add_rounded, color: Colors.white, size: 26),
+            Center(
+              child: Icon(
+                Icons.add_rounded,
+                color: Colors.white,
+                size: size * 0.5,
+              ),
             ),
           ],
         ),
@@ -582,7 +581,7 @@ class _SideRail extends StatelessWidget {
       unselectedLabelTextStyle: labelStyle.copyWith(color: AppColors.textFaint),
       leading: Padding(
         padding: const EdgeInsets.symmetric(vertical: 18),
-        child: _AddAction(onTap: onAdd),
+        child: _AddAction(size: 56, onTap: onAdd),
       ),
       destinations: const [
         NavigationRailDestination(
